@@ -20,6 +20,10 @@
   ;; The bar's own modules, one file each, as colorshell's bar/widgets/ is.
   #:use-module (scheme-desktop widgets bar workspaces)
   #:use-module (scheme-desktop widgets bar status)
+  #:use-module (scheme-desktop widgets bar volume)
+  #:use-module (scheme-desktop widgets bar network)
+  #:use-module (scheme-desktop widgets bar bluetooth)
+  #:use-module (scheme-desktop widgets bar media)
   #:use-module (scheme-desktop style)
 
   #:export (build-bar! bar-clock))
@@ -72,8 +76,12 @@ hotplug can tell one bar from another; for-each-monitor supplies it."
                                              (exec-async '("notify-send"
                                                            "hello from Scheme")))))
 
-            ;; centre
+            ;; centre: what is playing, between the clock and its own
+            ;; controls.  Empty when no player is running.
             (element <gtk-box> #:slot 'center
+                     #:orientation 'horizontal
+                     #:class "bar-center"
+                     (media-widget)
                      (element <gtk-label>
                               #:label bar-clock
                               #:class "clock"))
@@ -82,6 +90,9 @@ hotplug can tell one bar from another; for-each-monitor supplies it."
             (element <gtk-box> #:slot 'end
                      #:orientation 'horizontal
                      #:class "bar-end"
+                     (network-widget)
+                     (bluetooth-widget)
+                     (volume-widget)
                      (battery-widget)
                      (element <gtk-menu-button>
                               #:class "bar-button"
