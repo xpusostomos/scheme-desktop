@@ -10,6 +10,10 @@
 (use-modules (scheme-toolkit app))
 (use-modules (scheme-desktop style))
 (use-modules (scheme-desktop widgets bar))
+;; Imported for its side effect of being loaded, so that a keybinding's
+;; (scheme-desktop api) expression resolves over the REPL.  Nothing here calls
+;; it -- the shell's own vocabulary is called FROM outside.
+(use-modules (scheme-desktop api))
 
 (define (main)
   ;; for-each-monitor keys a root per monitor, so a hotplug builds a bar for the
