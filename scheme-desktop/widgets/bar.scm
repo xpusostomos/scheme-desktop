@@ -17,6 +17,10 @@
   #:use-module (scheme-toolkit app)
   #:use-module (scheme-toolkit process)
   #:use-module (scheme-toolkit time)
+  ;; The bar's own modules, one file each, as colorshell's bar/widgets/ is.
+  #:use-module (scheme-desktop widgets bar workspaces)
+  #:use-module (scheme-desktop widgets bar status)
+  #:use-module (scheme-desktop style)
 
   #:export (build-bar! bar-clock))
 
@@ -38,7 +42,8 @@
 
 NAME is the monitor's own identifier, passed on to the window so that a
 hotplug can tell one bar from another; for-each-monitor supplies it."
-  (layer-window
+  (let ((win
+   (layer-window
    name
    #:anchor '(top left right)
    #:exclusivity 'exclusive
@@ -53,12 +58,16 @@ hotplug can tell one bar from another; for-each-monitor supplies it."
    (element <gtk-center-box>
             #:name (string-append "bar-" name)
 
-            ;; start
+            ;; start: workspace pills, then the Welcome button from the AGS
+            ;; template.  The pills are the first `For'-style module -- they
+            ;; rebuild themselves when the workspace list or the focus changes.
             (element <gtk-box> #:slot 'start
+                     #:orientation 'horizontal
+                     #:class "bar-start"
+                     (workspaces-widget)
                      (element <gtk-button>
                               #:label "Welcome"
                               #:class "bar-button"
-                              ;; AGS's template runs a shell command here.
                               #:on-clicked (lambda (b)
                                              (exec-async '("notify-send"
                                                            "hello from Scheme")))))
@@ -69,9 +78,17 @@ hotplug can tell one bar from another; for-each-monitor supplies it."
                               #:label bar-clock
                               #:class "clock"))
 
-            ;; end
-            (element <gtk-menu-button> #:slot 'end
-                     #:class "bar-button"
-                     (element <gtk-label> #:label "Calendar")
-                     (element <gtk-popover>
-                              (element <gtk-calendar>))))))
+            ;; end: battery, then the calendar popover.
+            (element <gtk-box> #:slot 'end
+                     #:orientation 'horizontal
+                     #:class "bar-end"
+                     (battery-widget)
+                     (element <gtk-menu-button>
+                              #:class "bar-button"
+                              (element <gtk-label> #:label "Calendar")
+                              (element <gtk-popover>
+                                       (element <gtk-calendar>))))))))
+    ;; The stylesheet goes on the toplevel, so one call covers the whole bar
+    ;; including the popover's contents.
+    (apply-shell-css! win)
+    win))

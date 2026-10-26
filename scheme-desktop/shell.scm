@@ -8,6 +8,7 @@
 
 (use-modules (scheme-toolkit gi))
 (use-modules (scheme-toolkit app))
+(use-modules (scheme-desktop style))
 (use-modules (scheme-desktop widgets bar))
 
 (define (main)
