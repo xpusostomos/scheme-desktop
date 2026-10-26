@@ -1,0 +1,37 @@
+#!/bin/sh
+# bin/scheme-desktop -- this shell's entry point.
+#
+# All the environment work is scheme-toolkit's: the layer-shell preload and the
+# two library paths are load-bearing and easy to get wrong, so they live in one
+# place.  This wrapper only adds the extra -L for this checkout, so that
+# (scheme-desktop ...) resolves alongside (scheme-toolkit ...).
+#
+#   run [args]   start the shell
+#   eval EXPR    evaluate an expression in the running shell (later: D4)
+
+set -e
+
+SELF="$(readlink -f "$0")"
+DESKTOP_ROOT="$(dirname "$(dirname "$SELF")")"
+TOOLKIT_ROOT="$(dirname "$DESKTOP_ROOT")/scheme-toolkit"
+
+[ -x "$TOOLKIT_ROOT/bin/scheme-toolkit" ] || {
+    echo "scheme-desktop: cannot find scheme-toolkit at $TOOLKIT_ROOT" >&2
+    echo "the two are built in tandem and this one depends on it" >&2
+    exit 1
+}
+
+case "${1:-run}" in
+    run)
+        shift || true
+        # scheme-toolkit run supplies the environment and the toolkit's load
+        # path; -L adds this checkout so (scheme-desktop ...) resolves.
+        exec "$TOOLKIT_ROOT/bin/scheme-toolkit" guile \
+             -L "$DESKTOP_ROOT" \
+             -e main -s "$DESKTOP_ROOT/scheme-desktop/shell.scm" "$@"
+        ;;
+    *)
+        # Everything else is scheme-toolkit's (eval, repl, list, check-env).
+        exec "$TOOLKIT_ROOT/bin/scheme-toolkit" "$@"
+        ;;
+esac

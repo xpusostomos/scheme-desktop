@@ -1,0 +1,77 @@
+;;; (scheme-desktop widgets bar) -- the bar, one per monitor
+;;;
+;;; The D1 milestone: ~/GIT/ags/cli/data/gtk4/Bar.tsx reproduced in Scheme.  It
+;;; exercises every part of the element runtime in thirty lines -- child slots,
+;;; signal props, nesting, a non-intrinsic GI class, and an accessor bound to a
+;;; property -- and it is the first thing you can look at.
+;;;
+;;; The STRUCTURE is colorshell's (src/window/bar/index.tsx): one window, one
+;;; centerbox, a module per widget.  ags2-shell's bar is ~250 lines of
+;;; options-driven variants -- position, transparency, screen corners, cairo
+;;; input regions -- which arrive with options at D5, not here.
+
+(define-module (scheme-desktop widgets bar)
+  #:use-module (scheme-toolkit gi)
+  #:use-module (scheme-toolkit reactive)
+  #:use-module (scheme-toolkit widget)
+  #:use-module (scheme-toolkit app)
+  #:use-module (scheme-toolkit process)
+  #:use-module (scheme-toolkit time)
+
+  #:export (build-bar! bar-clock))
+
+(define-gi-imports "Gtk"
+  "Box" "CenterBox" "Label" "Button" "MenuButton" "Popover" "Calendar")
+(define-gi-imports "Astal" "Window")
+
+;; The clock, from the same poll the AGS template uses:
+;;
+;;   const time = Variable("", { poll: [1000, "date +%H:%M"] })
+;;
+;; Binding it to a label property is what makes it live: the element runtime
+;; subscribes, and re-sets #:label whenever the accessor's value changes.
+;; create-poll is cold, so this costs nothing until a label subscribes to it.
+(define bar-clock (create-poll 1000 '("date" "+%H:%M")))
+
+(define* (build-bar! monitor #:key (name "bar"))
+  "Build the bar for MONITOR and return it.
+
+NAME is the monitor's own identifier, passed on to the window so that a
+hotplug can tell one bar from another; for-each-monitor supplies it."
+  (layer-window
+   name
+   #:anchor '(top left right)
+   #:exclusivity 'exclusive
+   #:layer 'top
+   #:gdkmonitor monitor
+   #:class "Bar"
+   ;; NOTE: no #:namespace.  Setting a custom layer-shell namespace makes the
+   ;; window build, present without error, and then never appear -- Hyprland
+   ;; keeps no surface for it.  The default namespace works.  See
+   ;; docs/known-issues.md in scheme-toolkit.
+
+   (element <gtk-center-box>
+            #:name (string-append "bar-" name)
+
+            ;; start
+            (element <gtk-box> #:slot 'start
+                     (element <gtk-button>
+                              #:label "Welcome"
+                              #:class "bar-button"
+                              ;; AGS's template runs a shell command here.
+                              #:on-clicked (lambda (b)
+                                             (exec-async '("notify-send"
+                                                           "hello from Scheme")))))
+
+            ;; centre
+            (element <gtk-box> #:slot 'center
+                     (element <gtk-label>
+                              #:label bar-clock
+                              #:class "clock"))
+
+            ;; end
+            (element <gtk-menu-button> #:slot 'end
+                     #:class "bar-button"
+                     (element <gtk-label> #:label "Calendar")
+                     (element <gtk-popover>
+                              (element <gtk-calendar>))))))
