@@ -10,10 +10,20 @@ patching the toolkit, that is a toolkit bug.
 
 **Target:** GTK4, Astal (GTK4 namespaces), Wayland/Hyprland. GTK3 out of scope.
 
-**Parity target:** the union of **ags2-shell** and **colorshell**
-(`~/GITE/ags-shells/{ags2-shell,colorshell}`), which between them cover the
-most ground of any AGS v3 shells surveyed. Where they disagree on approach, the
-choice is called out per feature.
+**Parity target: `ags2-shell`** (`~/GITE/ags-shells/ags2-shell`). What we are
+aiming for is *ags2-shell's functionality*. `colorshell` remains a source of
+ideas — its plugin architecture, its control-centre tiles/pages structure, its
+`PopupWindow`-as-a-subclass shape are all still worth taking — but where the two
+differ on what a feature IS or DOES, ags2-shell decides. Earlier drafts of this
+document put colorshell first for structure; that is superseded.
+
+**Order of work: the top status bar comes first, and it is not finished.** The
+bar is the thing a user looks at all day, and the current one is weak and buggy.
+Every window feature (launcher, notifications, control centre) waits until the
+bar is genuinely complete: every module present, correct, configurable and
+robust against the services it reads being absent. Wandering off into new windows
+on top of a shaky bar compounds the shakiness — see § 4, which is reordered
+accordingly.
 
 ---
 
@@ -463,36 +473,123 @@ included.
 
 ---
 
+### D6.5 — Finish the top bar  *(~1–2 weeks)*  ⚠ **do this before D7**
+
+**The bar is the thing a user looks at all day and it is not finished.** It
+currently renders: workspace pills, media, clock, network, bluetooth, volume,
+battery, and a calendar popover. That is not ags2-shell's bar, and several of
+the modules that exist are only just correct — they handle the happy path and
+degrade quietly off it.
+
+**Nothing new gets built until this is done.** Every window feature (D7 launcher,
+D8 notifications, D9 control centre) sits on top of the bar the user actually
+lives in, and adding windows to a shaky bar compounds the shakiness.
+
+**Build — the modules ags2-shell's bar has that ours does not:**
+
+| Module | Source | Notes |
+|---|---|---|
+| Focused client | `widget/Bar/components/Buttons/FocusedClient.tsx` | The window title; the most conspicuous absence — a bar that cannot say what is focused is not a status bar |
+| Tray | `widget/Bar/components/Buttons/SystemTray.tsx` | StatusNotifier. `Gtk.PopoverMenu` + the dbusmenu action group; needs D10's tray work, so a stub that shows the item count is acceptable here and the real menu at D10 |
+| Power profiles | `Buttons/PowerProfiles.tsx` | `AstalPowerProfiles`; a one-click cycle |
+| Brightness | `Buttons/Brightness.tsx`, `ScreenRecord.tsx` | Backlight via `AstalBrightness`; DDC only at D10 |
+| Date/time menu | `widget/Bar/components/DateMenu/` | We have a bare `Gtk.Calendar`; ags2-shell's has the calendar plus event/todo panes |
+| Screen recording | `Buttons/ScreenRecord.tsx` | A recording indicator, at minimum |
+
+**Build — correctness of what already exists.**  Each of these is a case where
+the current module is wrong or silent:
+
+- **a module whose service is absent must be absent, not empty.** A machine
+  with no battery, no bluetooth adapter or no wireless card must not render an
+  empty box with padding, and must not log an error. `(battery)` returning `#f`
+  is the normal case, not a failure — it needs a test per module.
+- **every module must survive its service disappearing at runtime** (bluetooth
+  powered off, sink removed, player exiting). The reactive bindings are only
+  tested on services that stay up.
+- **the bar must not reflow when a module's state changes.** The
+  `.unavailable` dimming added at D6 is the right idea; it needs applying
+  consistently and checking that nothing shifts by a pixel.
+- **workspace pills**: verify against `AstalWorkspace` rather than only
+  `AstalHyprland`, and check special/renamed workspaces.
+- **the clock** should support a seconds option and the date format ags2-shell
+  offers, from config.
+- **bar height, margin and opacity** are config options that exist (D5) but are
+  not all applied: `bar-height` is read by nothing.
+
+**Also, from observation of the running shell:**
+
+- one `Gtk-CRITICAL` at startup ("New application windows must be added after
+  GApplication::startup") — cosmetic, documented, and worth root-causing here
+  rather than after more windows exist.
+
+**Done when:** the bar's module set matches ags2-shell's, each module is
+configurable, each is tested with its service absent AND present, toggling
+every service at runtime changes nothing but the affected widget, and the
+stylesheet has no class that no widget emits (tests/style-classes.scm extends
+to cover this).
+
+---
+
 ### D7 — Launcher and apps drawer  *(~1–2 weeks; needs M8)*
 
 **Plugins for parity** (colorshell's 7): apps, clipboard, websearch, shell,
 media, wallpapers, kill — prefixes `?` `#` `!` `>` `:`.
 
+The framework and this shell's four plugins already exist
+(`(scheme-toolkit launcher)`, `(scheme-desktop plugins)`, verified live at
+`launcher-search`). What is missing is the **window**: an entry, a results list,
+and the keybindings that open it.
+
 **Reference:** colorshell `src/runner/` (1,526) **best plugin architecture**
 (`runner/widgets/ResultsList.tsx` is an `Adw.Bin` subclass — a `define-class`
 over `<adw-bin>` test case); matshell `utils/picker/` (frecency); ags2-shell
 `widget/Bar/components/Launcher/` (+ `tests/bar/launcher-lifecycle.test.ts`,
-731 lines of behavioural spec); colorshell `src/window/apps-drawer/`.
+731 lines of behavioural spec — read it for behaviour even though ags2-shell is
+now the parity target for *functionality*: its launcher is the thinner one);
+colorshell `src/window/apps-drawer/`.
 
 **Done when:** `?query` searches the web, `#wall` finds wallpapers, frecency
 ranks by use.
 
 ---
 
-### D8 — Notifications  *(~1 week; needs M8)*
+### D8 — Notifications  *(~1 week; needs M8)*  ⚠ **gated on a decision**
 
-**Build:** own `org.freedesktop.Notifications` (TOOLKIT `notify` + `dbus`);
-popup windows with placement/timeout; history; DND; hold.
+**BLOCKED, and the blocker is not technical.** `org.freedesktop.Notifications`
+is a single-owner bus name, and on this machine **Omarchy's quickshell already
+owns it**. Measured: AstalNotifd cannot acquire its proxy ("cannot get proxy:
+quickshell is already running"), its `notifications` list stays empty, and its
+`notified` signal never fires — a `notify-send` during a 1.5 s main loop
+produced no signal at all.
+
+So "own the bus name" means *taking notifications away from the desktop that is
+already handling them*. The toolkit answers the question rather than assuming it
+(`(scheme-toolkit notify)` → `notify-status` is `'owner` / `'elsewhere` /
+`'absent`), following ags2-shell, which checks the name owner and **warns**
+rather than fighting for it.
+
+**The decision needed:** does scheme-desktop take over notifications (requiring
+quickshell's notification handling to be disabled), or does it treat them as out
+of scope on this desktop and only render history when it happens to own the
+name? Until that is answered, D8 cannot start.
+
+**Build (once unblocked):** `org.freedesktop.Notifications` (TOOLKIT `notify` +
+`dbus`); popup windows with placement/timeout; history; DND; hold. `notify-status`
+decides which of these are even meaningful at runtime, so the UI must be built
+from that answer rather than from an empty list — an empty list is what a quiet
+desktop looks like too.
 
 **Reference:** ags2-shell `service/notifications.ts` (146) +
-`lib/notifications.ts` (302) **daemon ownership**; colorshell
+`lib/notifications.ts` (302) **daemon ownership** — including its
+`#warn_if_not_daemon_owner`, which is the behaviour to copy; colorshell
 `src/modules/notifications.ts` (371) **data model**; colorshell
 `src/widget/Notification.tsx` (uses `Adw.Clamp`); ags2-shell
 `widget/Bar/components/Notifications/` + `EntryLifecycle.ts`, pinned by
 `notification-placement.test.ts` / `notificationViewport.test.ts` (876).
 
 **Done when:** `notify-send` pops a styled notification; history survives
-restart; DND suppresses popups but keeps history.
+restart; DND suppresses popups but keeps history — **on a desktop where this
+shell owns the name.**
 
 ---
 
@@ -598,8 +695,9 @@ week is the real test.
 | 6 | **M5** app + layer + lifecycle (+ optional `ags` shim) | **D4** multi-monitor, `api.scm`, keybindings via `eval`, wallpaper | A keybinding toggling the launcher through the REPL is the milestone's proof |
 | 7 | **M6** config | **D5** schema | |
 | 8 | **M7** styling | **D6** theming | |
-| 9 | **M8** launcher + notify frameworks | **D7** launcher | |
-| 10 | — | **D8** notifications | Second half of M8 |
+| 8b | — | **D6.5 finish the top bar** | **The bar comes before any new window.** A user lives in the bar; adding windows on a shaky one compounds the shakiness |
+| 9 | **M8** launcher + notify frameworks | **D7** launcher | Framework and this shell's plugins already exist; D7 adds the window |
+| 10 | — | **D8** notifications | **Gated on a decision** — another process owns the bus name on this desktop; see D8 |
 | 11 | — | **D9** control centre + OSD + settings | No new toolkit work |
 | 12 | — | **D10** peripherals | |
 | 13 | **M10** test harness (tiers 1–3) | — | Tier-2 live-shell tests have accrued since D1; this formalises the runner and adds the headless-compositor CI tier. Pull forward if D11 is next |
