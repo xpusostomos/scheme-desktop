@@ -20,11 +20,47 @@
 ;; thing to write and fails with "Wrong number of arguments to #<procedure
 ;; main ()>" -- after every module has loaded, so it reads like a deeper
 ;; problem than it is.
-(define (main . args)
+(define* (build-all-bars! #:key (force? #f))
   ;; for-each-monitor keys a root per monitor, so a hotplug builds a bar for the
-  ;; monitor that arrived and disposes the one that left.
+  ;; monitor that arrived and disposes the one that left.  A REBUILD passes
+  ;; force?: the roots already exist, so without it nothing would be built and
+  ;; the bar would simply disappear.
   (for-each-monitor
    (lambda (monitor name)
-     (build-bar! monitor #:name "bar"))))
+     (build-bar! monitor #:name "bar"))
+   #:force? force?))
+
+(define (main . args)
+  (build-all-bars!)
+
+  ;; Options that decide the bar's SHAPE apply on a rebuild rather than in
+  ;; place -- moving the bar to the other edge means re-anchoring the layer
+  ;; surface, and a changed module list means different children.  Options a
+  ;; widget binds to directly (clock-format) need nothing here: the label is
+  ;; subscribed to the accessor.
+  ;;
+  ;; Rebuilding is cheap and blunt on purpose.  The alternative is diffing two
+  ;; widget trees, which would cost more complexity than a bar is worth.
+  (watch-bar-layout!
+   (lambda ()
+     ;; Only the bars, on purpose: the option being watched is a bar option, and
+     ;; destroying every window in the registry would take out anything else
+     ;; that happened to be registered under another name.
+     (catch #t
+       (lambda ()
+         (destroy-windows! "bar")
+         (build-all-bars! #:force? #t)
+         ;; Present the new windows.  run-shell presents only on the
+         ;; application's ACTIVATE, which fires once, so without this the
+         ;; rebuilt bar is registered, visible in the registry, and has no
+         ;; surface at all -- the windows exist and nothing is on screen.
+         (for-each (lambda (w)
+                     (catch #t (lambda () (present w)) (lambda args #f)))
+                   (windows)))
+       (lambda (key . rest)
+         ;; A failed rebuild must not take the shell down: the bar is gone but
+         ;; the process still has a REPL, which is where the fix gets made.
+         (format (current-error-port)
+                 "scheme-desktop: cannot rebuild the bar: ~a ~s~%" key rest))))))
 
 (run-shell #:instance "scheme-desktop" #:main main)

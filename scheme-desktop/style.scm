@@ -30,6 +30,15 @@
   font-size: 13px;
 }
 
+/* A bar on the bottom edge needs its border on top.  The class is set by
+   widgets/bar.scm from the bar-position option, because the anchor and the
+   border side have to agree -- anchoring to one edge and styling for the other
+   looks like a CSS bug and is an option bug. */
+.Bar.bar-bottom {
+  border-bottom: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .Bar button,
 .Bar menubutton > button {
   background: transparent;
