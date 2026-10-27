@@ -35,7 +35,13 @@ greyed-out icon is noise on a desktop that never had bluetooth."
                       (bluetooth-icon (st-peek powered) (st-peek connected))))))
         (element <gtk-box>
                  #:orientation 'horizontal
-                 #:class "bluetooth"
+                 ;; As with network: powered off is dimmed, not hidden, so the
+                 ;; bar's layout does not shift when bluetooth is toggled.
+                 #:class (create-computed
+                          (lambda ()
+                            (if (st-peek powered)
+                                "bluetooth"
+                                "bluetooth unavailable")))
                  #:tooltip-text (create-computed
                                  (lambda ()
                                    (if (st-peek powered)

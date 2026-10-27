@@ -58,10 +58,19 @@ where a full battery does not."
                                          (st-peek state)
                                          (st-peek pct)))))
              (text (create-computed
-                    (lambda () (percent-string (pct))))))
+                    (lambda () (percent-string (pct)))))
+             ;; The stylesheet decides what "low" LOOKS like; this decides when
+             ;; it applies.  Charging at 5% is not the emergency that idle at 5%
+             ;; is, so charging keeps it calm.
+             (class (create-computed
+                     (lambda ()
+                       (let ((p (st-peek pct)) (c (st-peek charging)))
+                         (if (and (number? p) (< p 0.15) (not c))
+                             "battery low"
+                             "battery"))))))
         (element <gtk-box>
                  #:orientation 'horizontal
-                 #:class "battery"
+                 #:class class
                  ;; #:icon-name is a property like any other, so a computed
                  ;; binds to it directly.
                  (element <gtk-image> #:icon-name icon-name)

@@ -71,7 +71,14 @@ name worth showing, and both reference shells leave it blank."
                                     (st-peek ssid))))))
         (element <gtk-box>
                  #:orientation 'horizontal
-                 #:class "network"
+                 ;; Dimmed when offline rather than removed: a widget that
+                 ;; disappears makes the bar reflow every time the network
+                 ;; drops, which is more distracting than the state it reports.
+                 #:class (create-computed
+                          (lambda ()
+                            (if (connected? (st-peek connectivity))
+                                "network"
+                                "network unavailable")))
                  #:tooltip-text text
                  (element <gtk-image> #:icon-name icon)
                  (element <gtk-label> #:label text)))))
