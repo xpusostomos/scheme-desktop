@@ -25,6 +25,8 @@
   #:export (volume-up! volume-down! volume-mute!
             media-play-pause! media-next! media-previous!
             screenshot screenshot-area
+            launcher-search launcher-run-first!
+            notification-status
             describe-state))
 
 ;;; ---------------------------------------------------------------------------
@@ -105,6 +107,70 @@ anything, so it must not be an error."
    (else (exec-async '("sh" "-c" "grim - | wl-copy")))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Launcher
+;;; ---------------------------------------------------------------------------
+;;
+;; The launcher's WINDOW is D7; these are the two things a keybinding or a test
+;; needs before there is one, and they are worth having on their own: searching
+;; from a terminal is how the plugin set gets exercised without a UI.
+
+(define (launcher-search query)
+  "The results QUERY produces, as a list of <result>.
+
+This is the same call the launcher window will make, so a plugin broken here is
+broken there -- and it can be checked without opening anything."
+  (catch #t
+    (lambda ()
+      (let ((iface (resolve-interface '(scheme-toolkit launcher))))
+        ((module-ref iface 'route) query)))
+    (lambda (key . args)
+      (format (current-error-port)
+              "scheme-desktop: launcher-search failed: ~a ~s~%" key args)
+      '())))
+
+(define (launcher-run-first! query)
+  "Run the first result for QUERY.  Returns its title, or #f.
+
+The smallest useful launcher: a keybinding that runs what you typed.  It also
+exercises the whole path -- plugin, action, subprocess -- from one expression."
+  (let ((results (launcher-search query)))
+    (if (null? results)
+        (begin (format (current-error-port)
+                       "scheme-desktop: nothing matches ~s~%" query)
+               #f)
+        ;; result-title / result-action, not slot-ref: a <result> is a Scheme
+        ;; record, not a GObject, so the generic property path does not apply to
+        ;; it.  slot-ref here would fail with "no slot named title" at exactly
+        ;; the moment a keybinding tried to run something.
+        (let* ((iface (resolve-interface '(scheme-toolkit launcher)))
+               (title ((module-ref iface 'result-title) (car results)))
+               (action ((module-ref iface 'result-action) (car results))))
+          (when action
+            (catch #t action
+                   (lambda (key . args)
+                     (format (current-error-port)
+                             "scheme-desktop: launcher action failed: ~a ~s~%"
+                             key args))))
+          title))))
+
+;;; ---------------------------------------------------------------------------
+;;; Notifications
+;;; ---------------------------------------------------------------------------
+
+(define (notification-status)
+  "Who is receiving notifications on this session bus.
+
+'owner means this shell's notification data is real; 'elsewhere means another
+process (quickshell, dunst, mako) owns the name and this shell can see nothing.
+A UI that ignored the difference would render an empty list, which looks exactly
+like a quiet desktop."
+  (catch #t
+    (lambda ()
+      (let ((iface (resolve-interface '(scheme-toolkit notify))))
+        ((module-ref iface 'notify-status))))
+    (lambda args 'unknown)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Diagnostics
 ;;; ---------------------------------------------------------------------------
 
@@ -122,6 +188,10 @@ keybinding when something looks wrong."
                         (windows-named name)))
             (catch #t (lambda () (window-names)) (lambda args '())))
   (format port "monitors: ~a~%" (length (monitors)))
+  ;; Reported here because it is the one piece of state that looks identical
+  ;; when broken: a shell that cannot see notifications shows an empty list,
+  ;; which is what a quiet desktop shows too.
+  (format port "notifications: ~a~%" (notification-status))
   (format port "repl: ~a~%"
           (catch #t
             (lambda ()
