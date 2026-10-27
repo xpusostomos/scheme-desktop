@@ -17,6 +17,7 @@
 (use-modules (scheme-toolkit gi))
 (use-modules (scheme-toolkit repl))
 (use-modules (srfi srfi-1))
+(use-modules (srfi srfi-13))
 (use-modules (srfi srfi-64))
 (use-modules (ice-9 popen))
 (use-modules (ice-9 rdelim))
@@ -73,7 +74,13 @@
 (test-begin "live-shell")
 
 (if (not (shell-running?))
-    (test-skip "no shell is listening; start one with bin/scheme-desktop run")
+    (begin
+      ;; A plain marker as well as the srfi-64 skip.  srfi-64 prints NOTHING
+      ;; for a suite whose only decision was to skip -- no summary line, no
+      ;; "* SKIP" -- which is indistinguishable from a file that aborted
+      ;; partway.  bin/run-tests greps for this line to tell the two apart.
+      (display "*** LIVE-SHELL SKIPPED: no shell is listening ***\n")
+      (test-skip "no shell is listening; start one with bin/scheme-desktop run"))
     (begin
       (test-group "the shell answers over its REPL"
         ;; (current-thread) being the GTK thread is the property M0.5's plan
