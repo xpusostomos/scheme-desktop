@@ -1,0 +1,131 @@
+#!/bin/bash
+# bin/kill-scheme-desktop -- stop every running scheme-desktop shell.
+#
+# Why this exists as a script rather than a `pkill` you type: the pattern has to
+# be narrow.  This machine also runs an AGS shell (`gjs -m .../ags2-shell.*`),
+# which owns its own layer surfaces and its own notification daemon, and a
+# `pkill -f layer-shell` or a loose `pkill guile` takes that with it.
+#
+# It also cleans up rather than only killing.  A shell that is SIGKILLed cannot
+# remove its REPL socket, and a stale socket makes the next launch look like a
+# crash: `scheme-toolkit list` prints "(stale)" and anything that checks for the
+# file rather than for a listener mistakes it for a running shell.
+#
+#   kill-scheme-desktop              ask each shell to quit, then wait
+#   kill-scheme-desktop --force      SIGKILL immediately
+#   kill-scheme-desktop --dry-run    list what would be killed
+#   kill-scheme-desktop --all        every instance, not just this checkout's
+#
+# Exit status is 0 when nothing is left running, 1 otherwise.
+
+set -uo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+DESKTOP_ROOT="$(dirname "$(dirname "$SELF")")"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
+SOCKET_DIR="$RUNTIME_DIR/scheme-toolkit"
+
+force=0
+dry_run=0
+all=0
+for arg in "$@"; do
+    case "$arg" in
+        --force|-f)   force=1 ;;
+        --dry-run|-n) dry_run=1 ;;
+        --all|-a)     all=1 ;;
+        -h|--help)
+            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        *) echo "kill-scheme-desktop: unknown option $arg" >&2; exit 2 ;;
+    esac
+done
+
+# The pattern requires "guile" AND the shell script this checkout runs.  Both
+# halves are load-bearing:
+#
+#   "guile"      keeps out anything that merely MENTIONS the path -- an editor
+#                with the file open, a grep, or another copy of this script.
+#   the real path keeps out ags2-shell (a gjs runtime) and any other shell.
+#
+# `pgrep -f` matches a command line, so a wide pattern here is how a "kill my
+# shell" script ends up killing the desktop it runs on.
+if [ "$all" = 1 ]; then
+    pattern='guile.*scheme-desktop/shell\.scm'
+else
+    pattern="guile.*${DESKTOP_ROOT//./\\.}/scheme-desktop/shell\\.scm"
+fi
+
+pids="$(pgrep -f "$pattern" 2>/dev/null || true)"
+
+if [ -z "$pids" ]; then
+    echo "kill-scheme-desktop: no running scheme-desktop shell"
+    # A socket with no process is the stale case this script exists to clear.
+    if [ -n "$RUNTIME_DIR" ] && [ -d "$SOCKET_DIR" ]; then
+        stale="$(find "$SOCKET_DIR" -name '*.sock' 2>/dev/null || true)"
+        if [ -n "$stale" ]; then
+            echo "kill-scheme-desktop: clearing stale socket(s)"
+            [ "$dry_run" = 1 ] || rm -f "$SOCKET_DIR"/*.sock
+        fi
+    fi
+    exit 0
+fi
+
+if [ "$dry_run" = 1 ]; then
+    # shellcheck disable=SC2086
+    ps -o pid,etime,cmd -p $pids 2>/dev/null | tail -n +2
+    exit 0
+fi
+
+if [ "$force" = 0 ]; then
+    echo "kill-scheme-desktop: asking to quit (pids: $(echo "$pids" | tr '\n' ' '))"
+    kill -TERM $pids 2>/dev/null || true
+
+    # Wait, because a shell that exits cleanly removes its own socket and that
+    # is strictly better than this script guessing which files to delete.  Ten
+    # seconds is generous: shutdown disposes the reactive roots and the windows.
+    for _ in $(seq 1 20); do
+        sleep 0.5
+        remaining=""
+        for p in $pids; do
+            kill -0 "$p" 2>/dev/null && remaining="$remaining $p"
+        done
+        [ -z "$remaining" ] && break
+    done
+
+    if [ -n "$remaining" ]; then
+        echo "kill-scheme-desktop: did not exit, forcing:$remaining"
+        # shellcheck disable=SC2086
+        kill -KILL $remaining 2>/dev/null || true
+        sleep 0.5
+    fi
+else
+    echo "kill-scheme-desktop: killing (pids: $(echo "$pids" | tr '\n' ' '))"
+    kill -KILL $pids 2>/dev/null || true
+    sleep 0.5
+fi
+
+# Whatever is left.  A SIGKILLed shell leaves its socket, and a socket file with
+# nothing listening is worse than no socket: it makes the next launch look like
+# a crash to anything that tests for the file.
+left="$(pgrep -f "$pattern" 2>/dev/null || true)"
+if [ -n "$left" ]; then
+    echo "kill-scheme-desktop: still running: $(echo "$left" | tr '\n' ' ')" >&2
+    exit 1
+fi
+
+if [ -n "$RUNTIME_DIR" ] && [ -d "$SOCKET_DIR" ]; then
+    for sock in "$SOCKET_DIR"/*.sock; do
+        [ -e "$sock" ] || continue
+        # Only remove a socket whose instance is genuinely gone.  Another
+        # scheme-desktop started after this one began would otherwise lose its
+        # endpoint while still running.
+        name="$(basename "$sock" .sock)"
+        if ! "$DESKTOP_ROOT/../scheme-toolkit/bin/scheme-toolkit" list 2>/dev/null \
+                | grep -q "^$name[[:space:]]"; then
+            rm -f "$sock"
+        fi
+    done
+fi
+
+echo "kill-scheme-desktop: done"
+exit 0
