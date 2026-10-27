@@ -1,181 +1,303 @@
 ;;; (scheme-desktop style) -- this shell's stylesheet
 ;;;
-;;; The CSS lives here; provider lifetime, parse-error reporting and priority
-;;; are (scheme-toolkit style)'s job, and colour files are
-;;; (scheme-toolkit palette)'s.  That split is the point: every shell has a
-;;; stylesheet, and none of them should rediscover that an unheld provider is
-;;; collected or that a colour literal begins with '#'.
+;;; PORTED FROM ags2-shell.  The rule bodies below are copied from its
+;;; style/compile/main.css (itself compiled from style/base/*.scss and
+;;; widget/Bar/style.scss), and the variables come from (scheme-desktop theme).
+;;; The aim is that a bar built here looks the same as theirs, so the rule
+;;; bodies are not paraphrased -- where a selector has been changed it is only to
+;;; match this shell's widget structure, never the declaration.
 ;;;
-;;; COLOURS COME FROM THE PALETTE, substituted at generation time, and the
-;;; stylesheet is rebuilt when the palette changes.  The alternative -- emitting
-;;; a `:root { --accent: ... }' block and writing var(--accent) in every rule --
-;;; was tried and dropped for two reasons:
+;;; WHY THE BODIES ARE COPIED RATHER THAN REINVENTED.  The difference between a
+;;; tray icon that looks right and one that has a rounded box around it is one
+;;; declaration -- `all: unset' -- and there is no way to guess it.  Getting
+;;; these right by trial costs a round trip to a pair of eyes each time; copying
+;;; costs nothing.
 ;;;
-;;;   - half the palette's keys are not valid custom-property names.  Omarchy
-;;;     writes dark_background and bright_foreground; a custom property name has
-;;;     to be a CSS identifier, and underscores are legal but the file's own
-;;;     convention is hyphens, so the emitted block silently declared nothing
-;;;     anybody could reference.
-;;;   - it bought nothing here.  GTK has no document root; `:root' matches every
-;;;     widget, which is a weaker guarantee than it looks, and a substituted
-;;;     literal cannot fail to resolve.
+;;; THE WIDGETS THEMSELVES CARRY NO STYLING.  (scheme-toolkit tray) emits a box
+;;; with class `tray' and buttons with class `tray-item' and nothing else -- no
+;;; colour, no radius, no shadow.  Everything visual lives here, in the shell,
+;;; so a different shell can reuse the widget and style it differently.  The
+;;; class names are the contract; this file is one implementation of it.
 ;;;
-;;; Regenerating the provider is cheap and certain, so that is what a palette
-;;; change does.
-;;;
-;;; The palette itself is READ from whatever this machine provides -- on an
-;;; Omarchy system that is ~/.local/state/omarchy/current/theme/colors.toml, so
-;;; the shell follows the desktop's own theme rather than competing with it.
-;;; Nothing found means the built-in default, so a fresh machine is merely
-;;; less pretty, never broken.
+;;; PROVIDER PRIORITY is USER (800), from (scheme-toolkit style): it beats GTK's
+;;; own stylesheet and libadwaita's, which is what a shell needs to own its
+;;; appearance.
 
 (define-module (scheme-desktop style)
   #:use-module (scheme-toolkit gi)
   #:use-module (scheme-toolkit style)
   #:use-module (scheme-toolkit palette)
+  #:use-module (scheme-desktop theme)
   #:use-module (srfi srfi-11)
   #:export (apply-shell-css! shell-css shell-provider shell-palette))
 
-;; The palette in force.  Read once: a theme change is followed by a reload,
-;; not by re-reading the file on every redraw.
-(define %palette #f)
-
 (define (shell-palette)
-  "The palette this machine provides, or the built-in default."
-  (unless %palette
-    (set! %palette (or (read-palette) default-palette)))
-  %palette)
+  "The palette in force: the desktop's own theme, or the built-in default."
+  (or (read-palette) default-palette))
 
-;; A colour from the palette with an alpha applied, since several surfaces want
-;; the background a little translucent and GTK's rgba() is the only way to say
-;; so from a hex value.
-(define (alpha key a)
-  (let ((hex (palette-ref (shell-palette) key)))
-    (if (and hex (string? hex) (char=? (string-ref hex 0) #\#)
-             (= 7 (string-length hex)))
-        (format #f "rgba(~a, ~a, ~a, ~a)"
-                (string->number (substring hex 1 3) 16)
-                (string->number (substring hex 3 5) 16)
-                (string->number (substring hex 5 7) 16)
-                a)
-        hex)))
+;;; ---------------------------------------------------------------------------
+;;; Base and controls -- ags2-shell style/base/{_foundation,_primitives,_native}
+;;; ---------------------------------------------------------------------------
 
-(define (shell-css)
-  "The whole stylesheet, with the palette's colours substituted into it."
-  (string-append
-   "
+(define %base-css
+  "
+/* ---- base ------------------------------------------------------------- */
+
+/* ags2-shell's `%outlined-button', which its bar's `%flat-button' extends.
+   `all: unset' is the load-bearing line and the reason this file is a port
+   rather than a design: without it GTK's own button background and shadow
+   survive, and a tray icon gets the rounded box that prompted all of this. */
+button {
+  all: unset;
+  transition: var(--transition);
+  border-radius: var(--radius);
+  color: var(--fg);
+  padding: var(--padding);
+  background-color: var(--widget-bg);
+  box-shadow:
+    inset 0 0 0 var(--border-width) var(--border-color),
+    var(--neu-button-highlight),
+    var(--neu-button-shadow);
+  font-weight: bold;
+}
+
+button:hover:not(.active) {
+  background-color: var(--hover-bg);
+  color: var(--hover-fg);
+  box-shadow:
+    inset 0 0 0 var(--border-width) var(--border-color),
+    var(--neu-button-hover-highlight),
+    var(--neu-button-hover-shadow);
+}
+
+button:focus-visible {
+  outline: calc(var(--border-width) / 2) solid var(--primary-bg);
+  outline-offset: -1px;
+}
+
+button:active,
+button.on,
+button.active,
+button:checked {
+  background-image: var(--active-gradient);
+  background-color: var(--primary-bg);
+  color: var(--primary-fg);
+  box-shadow:
+    inset 0 0 0 var(--border-width) var(--border-color),
+    var(--neu-button-active-highlight),
+    var(--neu-button-active-shadow);
+}
+
+button:disabled {
+  box-shadow: none;
+  background-color: transparent;
+  color: color-mix(in srgb, var(--fg) 30%, transparent);
+}
+
+/* `%flat-button': what every button IN THE BAR is.  Two declarations, and they
+   are why the bar's buttons are flat while a dialog's are raised. */
+window#bar button {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+image {
+  -gtk-icon-size: var(--icon-size, 16px);
+}
+
+window {
+  background-color: var(--bg);
+  color: var(--fg);
+}
+
+separator.horizontal { min-height: var(--border-width); }
+separator.vertical   { min-width: var(--border-width); }
+
+tooltip {
+  background-color: transparent;
+  border: none;
+}
+
+tooltip label {
+  background-color: var(--bg);
+  border-radius: var(--radius);
+  border: var(--border-width) solid var(--popover-border-color);
+  color: var(--fg);
+  padding: 8px;
+  margin: 4px;
+  box-shadow:
+    0 0 3px 0 var(--shadow-color),
+    var(--neu-widget-highlight),
+    var(--neu-widget-shadow);
+}
+
+/* ---- popovers, including the tray's menus ----------------------------- */
+
+popover.menu {
+  background: transparent;
+  box-shadow: none;
+  border: none;
+}
+
+popover.menu > arrow {
+  background: transparent;
+  box-shadow: none;
+  border: none;
+}
+
+popover.menu > contents {
+  box-shadow: 0 0 5px 0 var(--shadow-color);
+  margin: max(var(--spacing), 8px);
+  border: var(--border-width) solid var(--popover-border-color);
+  background-color: var(--bg);
+  color: var(--fg);
+  border-radius: calc(var(--popover-radius) / 2);
+  padding: calc(var(--padding) / 2);
+  min-width: 180px;
+}
+
+popover.menu > contents stack,
+popover.menu > contents box {
+  padding: 0;
+  margin: 0;
+}
+
+popover.menu > contents modelbutton {
+  background-color: transparent;
+  box-shadow: none;
+  transition: var(--transition);
+  border-radius: var(--radius);
+  color: var(--fg);
+  padding: calc(var(--padding) * 0.8);
+  min-height: 0;
+  margin: 0;
+}
+
+popover.menu > contents modelbutton:focus-visible:hover {
+  outline: none;
+}
+
+popover.menu > contents modelbutton check,
+popover.menu > contents modelbutton radio,
+popover.menu > contents modelbutton arrow {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+popover.menu > contents modelbutton .accelerator {
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+  font-size: 0.9em;
+  margin-left: calc(var(--spacing) / 2);
+}
+
+popover.menu > contents separator {
+  margin: calc(var(--radius) / 2);
+  min-height: 1px;
+  background-color: color-mix(in srgb, var(--fg) 20%, transparent);
+}
+")
+
+;;; ---------------------------------------------------------------------------
+;;; The bar
+;;; ---------------------------------------------------------------------------
+
+(define %bar-css
+  "
 /* ---- the bar ---------------------------------------------------------- */
 
-.Bar {
-  background: " (alpha 'background 0.92) ";
-  border-bottom: 1px solid " (alpha 'foreground 0.06) ";
-  padding: 0 6px;
-  font-size: 13px;
-  color: " (palette-ref (shell-palette) 'foreground) ";
+window#bar {
+  background-color: transparent;
 }
 
-/* A bar on the bottom edge needs its border on top.  The class is set by
-   widgets/bar.scm from the bar-position option, because the anchor and the
-   border side have to agree -- anchoring to one edge and styling for the other
-   looks like a CSS bug and is an option bug. */
-.Bar.bar-bottom {
-  border-bottom: none;
-  border-top: 1px solid " (alpha 'foreground 0.06) ";
+/* ags2-shell wraps its bar's contents in a box.panel that carries the
+   background, which is what lets the window itself stay transparent -- the
+   reason their screen-corner decorations can draw outside the bar.  This shell
+   has no such wrapper yet, so the class carries the same declarations on the
+   centrebox.  Same rule body, different element. */
+window#bar .panel {
+  transition: var(--transition);
+  background-color: var(--bg);
+  padding: calc(var(--padding) * 0.3);
 }
 
-.Bar button,
-.Bar menubutton > button {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  min-height: 0;
-  padding: 2px 8px;
-  border-radius: 6px;
-  color: " (alpha 'foreground 0.85) ";
+window#bar .panel > box {
+  margin: 0 calc(var(--spacing) / 2);
 }
 
-.Bar button:hover {
-  background: " (alpha 'foreground 0.10) ";
+/* Every button in the bar, at the size ags2-shell uses.  `calc(var(--padding)
+   / 2)' is 4pt, and on a 16px icon that makes a ~26px box -- which with
+   --radius 12px is close enough to half its side to read as a circle on hover.
+   That is the whole of the circle-vs-squircle question. */
+window#bar button {
+  padding: calc(var(--padding) / 2);
 }
 
-/* The focused workspace.  The class is toggled by the workspaces module; the
-   module decides WHICH pill is current, the stylesheet decides what that looks
-   like. */
-.Bar .workspace {
-  min-width: 22px;
-  color: " (alpha 'muted 1.0) ";
+/* A bar on the bottom edge.  Not an ags2-shell rule: theirs switches on the
+   anchor in TypeScript, and this shell does it with a class from
+   widgets/bar.scm. */
+window#bar.bar-bottom .panel {
+  border-top: var(--border-width) solid var(--border-color);
 }
 
-.Bar .workspace.active {
-  background: " (palette-ref (shell-palette) 'accent) ";
-  color: " (palette-ref (shell-palette) 'background) ";
-  font-weight: 600;
+window#bar .bar-start,
+window#bar .bar-center,
+window#bar .bar-end {
+  margin: 0 calc(var(--spacing) / 2);
 }
 
-.Bar .workspace.special {
+/* The clock is the bar's most-read text, so it keeps the emphasis ags2-shell
+   gives its date menu button. */
+window#bar .clock {
+  font-weight: bold;
+  color: var(--fg);
+  padding: 0 calc(var(--spacing) / 2);
+}
+
+/* The focused workspace, toggled by the workspaces module.  The module decides
+   WHICH pill is current; this decides what that looks like. */
+window#bar .workspace {
+  min-width: 24px;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+  font-weight: bold;
+}
+
+window#bar .workspace.active {
+  background-color: var(--primary-bg);
+  color: var(--primary-fg);
+}
+
+window#bar .workspace.special {
   font-style: italic;
 }
 
-.Bar .clock {
-  font-weight: 600;
-  color: " (palette-ref (shell-palette) 'foreground) ";
-  padding: 0 10px;
+/* Present but dimmed, rather than removed: a widget that disappears makes the
+   bar reflow every time a device comes and goes. */
+window#bar .unavailable {
+  color: color-mix(in srgb, var(--fg) 40%, transparent);
 }
 
-.Bar .battery {
-  padding: 0 6px;
+window#bar .battery.low .battery-label {
+  color: var(--error-bg);
 }
 
-.Bar .battery-label {
-  color: " (alpha 'foreground 0.85) ";
-}
+/* ---- the tray --------------------------------------------------------- */
 
-.Bar .bar-start, .Bar .bar-end {
-  padding: 4px 2px;
+/* The tray's buttons need NO declarations of their own.  They are bar buttons,
+   so %flat-button already made them transparent with no shadow, and the base
+   button rule already gave them --radius and `all: unset'.  Anything added here
+   is a difference from ags2-shell; an earlier attempt added a fixed
+   border-radius and a box-shadow and produced exactly the rounded box that
+   prompted this port. */
+window#bar .tray {
+  margin: 0 calc(var(--spacing) / 2);
 }
+")
 
-/* A battery low enough to matter.  The class comes from the battery module,
-   which is alone in knowing what 'low' means for the current state. */
-.Bar .battery.low .battery-label {
-  color: " (palette-ref (shell-palette) 'red) ";
-}
-
-/* Network and bluetooth share the 'unavailable' convention: present in the
-   layout, dimmed rather than removed, so the bar does not reflow when a device
-   comes and goes. */
-.Bar .unavailable {
-  color: " (alpha 'muted 0.55) ";
-}
-
-/* The tray.  Its items are the applications' own icons, so the button must add
-   nothing of its own -- no background, no border, and just enough padding to
-   make them clickable.  The tray box hides itself while empty, so this padding
-   is never visible on a desktop with no tray items. */
-.Bar .tray {
-  padding: 0 4px;
-}
-
-.Bar .tray-item {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  min-height: 0;
-  min-width: 0;
-  padding: 1px 3px;
-  border-radius: 4px;
-}
-
-.Bar .tray-item:hover {
-  background: " (alpha 'foreground 0.10) ";
-}
-
-/* NO -gtk-icon-style HERE, deliberately.  Tray icons come from the
-   applications: some are symbolic and theme correctly, others are full-colour
-   (measured on this machine: JetBrains Toolbox and Syncthing ship colour
-   icons).  Forcing symbolic reinterprets the colour ones and renders them as
-   blank or wrong.  The arrow a menu button normally draws IS suppressed, but
-   that is set on the widget (always-show-arrow #f), not here. */
-"))
+(define (shell-css)
+  "The whole stylesheet: theme variables, ags2-shell's base, then the bar."
+  (string-append (theme-css) %base-css %bar-css))
 
 ;; One provider for the whole shell, parsed once and reused by every toplevel.
 ;; The toolkit holds it, so it cannot be collected out from under the windows.
@@ -191,8 +313,17 @@
       (set! %provider p)))
   %provider)
 
-(define (apply-shell-css! widget)
-  "Apply the shell's stylesheet to WIDGET, which should be a toplevel.
+(define (apply-shell-css!)
+  "Apply the shell's stylesheet to the DISPLAY.
 
-Called on each window as it is built; the provider itself is shared."
-  (apply-provider! widget (shell-provider)))
+DISPLAY-level, not per-widget, and that is the whole reason the bar looks like
+anything now.  GTK4 does not inherit a provider attached to a widget's context
+to its descendants -- unlike GTK3 -- so applying this to each toplevel's
+context styled the toplevels alone.  Every button, label and image inside them
+kept the theme's styling, which presents as a stylesheet that parses with zero
+errors and changes nothing.
+
+Takes no widget, because there is nothing per-window about it: one call covers
+every window this shell will ever open, including the ones built later."
+  (apply-provider-for-display! (shell-provider)))
+

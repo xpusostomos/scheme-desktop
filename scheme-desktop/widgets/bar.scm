@@ -123,6 +123,11 @@ hotplug can tell one bar from another; for-each-monitor supplies it."
 
    (element <gtk-center-box>
             #:name (string-append "bar-" name)
+            ;; The `panel' class is ags2-shell's: it is the element that carries
+            ;; the bar's background, which is what lets the WINDOW itself stay
+            ;; transparent.  Named here so their stylesheet rule applies to this
+            ;; shell's tree unchanged.
+            #:class "panel"
 
             ;; start: workspace pills, then the Welcome button from the AGS
             ;; template.  The pills are the first `For'-style module -- they
@@ -146,9 +151,11 @@ hotplug can tell one bar from another; for-each-monitor supplies it."
                    #:orientation 'horizontal
                    #:class "bar-end"
                    (modules-built (config-value 'desktop 'bar-end) 'bar-end))))))
-    ;; The stylesheet goes on the toplevel, so one call covers the whole bar
-    ;; including the popover's contents.
-    (apply-shell-css! win)
+    ;; The stylesheet is applied to the DISPLAY, once, not to this window.
+    ;; Calling it here is harmless (it is idempotent) and keeps the entry point
+    ;; where a reader looks for it, but the effect is global -- see
+    ;; apply-shell-css! for why a per-window call does not work in GTK4.
+    (apply-shell-css!)
     win))
 
 ;;; ---------------------------------------------------------------------------

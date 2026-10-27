@@ -77,9 +77,17 @@
     (test-assert "some classes were found at all" (pair? classes))
     (for-each
      (lambda (class)
-       ;; The window's own class comes from the bar, not a widget file, and
-       ;; is checked by its own assertion below.
-       (unless (member class '("Bar"))
+       ;; Two kinds of exception, both meaning "not a widget file says this".
+       ;;
+       ;;   Bar          this shell's window class, set by widgets/bar.scm
+       ;;   accelerator  emitted by GTK ITSELF -- GtkModelButton puts it on the
+       ;;                accelerator label it builds for a menu item.  Styling
+       ;;                it is legitimate and no file of ours names it, so the
+       ;;                test's premise ("a widget says this") does not hold.
+       ;;
+       ;; Anything else is still a failure: that IS how the styled-but-never-
+       ;; emitted classes .battery.low and .unavailable were caught.
+       (unless (member class '("Bar" "accelerator"))
          (test-assert (format #f "~a is emitted somewhere" class)
            (emitted? class))))
      classes)))
