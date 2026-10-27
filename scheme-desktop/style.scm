@@ -293,6 +293,25 @@ window#bar .battery.low .battery-label {
 window#bar .tray {
   margin: 0 calc(var(--spacing) / 2);
 }
+
+/* A DELIBERATE DIFFERENCE FROM ags2-shell, and the only one in this file.
+ *
+ * Everything else here is copied so the bar looks the same; this makes it look
+ * different on purpose, because the copy produces a rounded SQUARE and the
+ * wanted shape is a circle.
+ *
+ * The arithmetic: a tray button is an icon plus `calc(var(--padding) / 2)' of
+ * padding either side -- about 27px square -- and ags2-shell gives it
+ * `border-radius: var(--radius)', which is 12px.  12px on a 27px box is 89% of
+ * the way to a circle, which reads as a squircle rather than as either shape.
+ * `50%' is always exactly half the side, so it stays a circle whatever the
+ * icon size or padding becomes.
+ *
+ * The alternative -- raising --radius -- would change every other widget in the
+ * bar too, since that is what the whole stylesheet's corners are built from. */
+window#bar .tray-item {
+  border-radius: 50%;
+}
 ")
 
 (define (shell-css)
