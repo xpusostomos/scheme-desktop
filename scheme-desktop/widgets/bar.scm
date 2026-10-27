@@ -97,9 +97,23 @@ anchored to one edge and styled for the other."
              (if ctor
                  (loop (cdr rest) (cons (ctor) out))
                  (begin
+                   ;; A name the table does not know is SKIPPED rather than
+                   ;; fatal -- a typo should cost one widget, not the bar.  But
+                   ;; it is said loudly, and with the two things that make it
+                   ;; fixable: which option listed it, and what the valid names
+                   ;; are.
+                   ;;
+                   ;; This fires for a stale SAVED config, which is the common
+                   ;; case: the shipped default changes, the saved file still
+                   ;; names a widget that has since been removed, and the bar
+                   ;; silently comes up one widget short.  (That is exactly how
+                   ;; `welcome' was noticed after it was deleted.)
                    (format (current-error-port)
-                           "scheme-desktop: no such bar widget ~s in ~s~%"
-                           (car rest) where)
+                           "scheme-desktop: ~s is not a bar widget, skipping it (listed in ~s).~%  valid names: ~s~%"
+                           (car rest) where
+                           (sort (map car %modules)
+                                 (lambda (a b) (string<? (symbol->string a)
+                                                         (symbol->string b)))))
                    (loop (cdr rest) out))))))))
 
 (define* (build-bar! monitor #:key (name "bar"))
