@@ -18,7 +18,7 @@
   #:use-module (ice-9 format)
   #:export (volume-widget))
 
-(define-gi-imports "Gtk" "Box" "Image" "Label")
+(define-gi-imports "Gtk" "Box" "Image" "Label" "Button")
 
 (define (volume-icon muted volume)
   "An Adwaita symbolic icon for the current level."
@@ -51,12 +51,6 @@
         (element <gtk-button>
                  #:class "volume"
                  #:tooltip-text "Volume -- click to mute"
-                 #:on-clicked (lambda (b)
-                                (let ((sink (wp-default "default-speaker")))
-                                  (when sink
-                                    (catch #t
-                                      (lambda () (slot-set! sink 'mute
-                                                            (not (slot-ref sink 'mute))))
-                                      (lambda args #f)))))
+                 #:on-clicked (lambda (b) (speaker-mute-toggle!))
                  (element <gtk-image> #:icon-name icon)
                  (element <gtk-label> #:label text)))))

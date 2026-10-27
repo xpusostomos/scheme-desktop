@@ -15,7 +15,12 @@
 ;; it -- the shell's own vocabulary is called FROM outside.
 (use-modules (scheme-desktop api))
 
-(define (main)
+;; `guile -e main -s FILE' calls MAIN with ONE argument: the script's own
+;; command line, as a list of strings.  A zero-argument main is the natural
+;; thing to write and fails with "Wrong number of arguments to #<procedure
+;; main ()>" -- after every module has loaded, so it reads like a deeper
+;; problem than it is.
+(define (main . args)
   ;; for-each-monitor keys a root per monitor, so a hotplug builds a bar for the
   ;; monitor that arrived and disposes the one that left.
   (for-each-monitor

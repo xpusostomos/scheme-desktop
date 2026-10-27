@@ -66,14 +66,9 @@ error."
   (adjust-volume! (- amount)))
 
 (define (volume-mute!)
-  (let ((s (sink)))
-    (and s
-         (catch #t
-           (lambda ()
-             (let ((muted (not (slot-ref s 'mute))))
-               (slot-set! s 'mute muted)
-               muted))
-           (lambda (key . rest) (log-error (cons key rest) "mute") #f)))))
+  "Flip the default sink's mute.  The bar button calls the same toolkit
+procedure, so a keybinding and a click cannot disagree."
+  (speaker-mute-toggle!))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Media

@@ -1,20 +1,23 @@
-;;; (scheme-desktop style) -- the stylesheet
+;;; (scheme-desktop style) -- this shell's stylesheet
 ;;;
-;;; Generated in Scheme rather than kept as a .css file, so that the palette can
+;;; Only the CSS lives here.  Provider lifetime, parse-error reporting and
+;;; priority are (scheme-toolkit style)'s job -- they are the same for every
+;;; shell, and getting them wrong (an unheld provider, a swallowed parse error)
+;;; is a trap each shell should not rediscover.
+;;;
+;;; Generated in Scheme rather than kept as a .css file, so the palette can
 ;;; become variables at D6 without a templating step.  For now it is a plain
-;;; string with the shape the theming work will fill in.
+;;; string.
 ;;;
-;;; Priority: USER (800), matching AGS.  libadwaita's own stylesheet is at a
-;;; lower priority, so anything here wins -- which is what a shell wants and
-;;; what makes the D6 palette able to recolour Adw widgets too.
+;;; Priority: USER (800), matching AGS.  libadwaita's own stylesheet sits
+;;; lower, so anything here wins -- which is what a shell wants and what lets
+;;; the D6 palette recolour Adw widgets too.
 
 (define-module (scheme-desktop style)
   #:use-module (scheme-toolkit gi)
-  #:use-module (scheme-toolkit result)
-  #:use-module (oop goops)
-  #:export (apply-shell-css! shell-css))
-
-(define-gi-imports "Gtk" "CssProvider" "StyleContext")
+  #:use-module (scheme-toolkit style)
+  #:use-module (srfi srfi-11)
+  #:export (apply-shell-css! shell-css shell-provider))
 
 (define shell-css
   "
@@ -81,47 +84,22 @@
 }
 ")
 
-;; The provider is held here for the process's lifetime.
-;;
-;; A Gtk.CssProvider that nothing references is collected, and its styles then
-;; stop being applied -- the same trap as Gio.FileMonitor in (scheme-toolkit
-;; file), and it presents the same way: the stylesheet "works" for a while and
-;; then stops.
+;; One provider for the whole shell, parsed once and reused by every toplevel.
+;; The toolkit holds it, so it cannot be collected out from under the windows.
 (define %provider #f)
 
-(define* (shell-provider #:optional (css shell-css))
-  "Load CSS and return a provider, at USER priority (800).
-
-Per-widget rather than per-display.  gtk_style_context_add_provider_for_display
-is what a shell wants -- one call covers every window -- but GTK marks it
-deprecated and G-Golf's importer skips deprecated symbols, so it is not
-reachable by name.  Adding the provider to each toplevel's style context is the
-supported path and behaves the same for a handful of windows."
+(define (shell-provider)
+  "The shell's CSS provider, created on first use."
   (unless %provider
-    (let ((provider (make <gtk-css-provider>)))
-      ;; GTK reports each bad rule through this signal with its line and
-      ;; column, which is the only practical way to find a typo.
-      (connect provider 'parsing-error
-               (lambda (p section error)
-                 (format (current-error-port) "scheme-desktop: css: ~a\n"
-                         (catch #t (lambda () (slot-ref error 'message))
-                                (lambda a "parse error")))))
-      (load-from-string provider css)
-      (set! %provider provider)))
+    (let-values (((p errors) (css-provider-for shell-css)))
+      (for-each (lambda (e)
+                  (format (current-error-port) "scheme-desktop: css: ~a\n" e))
+                errors)
+      (set! %provider p)))
   %provider)
 
 (define (apply-shell-css! widget)
   "Apply the shell's stylesheet to WIDGET, which should be a toplevel.
 
-Called on each window as it is built; the provider itself is created once."
-  (catch #t
-    (lambda ()
-      (let ((ctx (get-style-context widget)))
-        (add-provider ctx (shell-provider) 800)
-        #t))
-    (lambda (key . args)
-      (format (current-error-port)
-              "scheme-desktop: cannot apply css to ~a: ~a ~s\n"
-              (catch #t (lambda () (class-name (class-of widget))) (lambda a '?))
-              key args)
-      #f)))
+Called on each window as it is built; the provider itself is shared."
+  (apply-provider! widget (shell-provider)))
