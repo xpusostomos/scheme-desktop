@@ -1,33 +1,77 @@
 ;;; (scheme-desktop style) -- this shell's stylesheet
 ;;;
-;;; Only the CSS lives here.  Provider lifetime, parse-error reporting and
-;;; priority are (scheme-toolkit style)'s job -- they are the same for every
-;;; shell, and getting them wrong (an unheld provider, a swallowed parse error)
-;;; is a trap each shell should not rediscover.
+;;; The CSS lives here; provider lifetime, parse-error reporting and priority
+;;; are (scheme-toolkit style)'s job, and colour files are
+;;; (scheme-toolkit palette)'s.  That split is the point: every shell has a
+;;; stylesheet, and none of them should rediscover that an unheld provider is
+;;; collected or that a colour literal begins with '#'.
 ;;;
-;;; Generated in Scheme rather than kept as a .css file, so the palette can
-;;; become variables at D6 without a templating step.  For now it is a plain
-;;; string.
+;;; COLOURS COME FROM THE PALETTE, substituted at generation time, and the
+;;; stylesheet is rebuilt when the palette changes.  The alternative -- emitting
+;;; a `:root { --accent: ... }' block and writing var(--accent) in every rule --
+;;; was tried and dropped for two reasons:
 ;;;
-;;; Priority: USER (800), matching AGS.  libadwaita's own stylesheet sits
-;;; lower, so anything here wins -- which is what a shell wants and what lets
-;;; the D6 palette recolour Adw widgets too.
+;;;   - half the palette's keys are not valid custom-property names.  Omarchy
+;;;     writes dark_background and bright_foreground; a custom property name has
+;;;     to be a CSS identifier, and underscores are legal but the file's own
+;;;     convention is hyphens, so the emitted block silently declared nothing
+;;;     anybody could reference.
+;;;   - it bought nothing here.  GTK has no document root; `:root' matches every
+;;;     widget, which is a weaker guarantee than it looks, and a substituted
+;;;     literal cannot fail to resolve.
+;;;
+;;; Regenerating the provider is cheap and certain, so that is what a palette
+;;; change does.
+;;;
+;;; The palette itself is READ from whatever this machine provides -- on an
+;;; Omarchy system that is ~/.local/state/omarchy/current/theme/colors.toml, so
+;;; the shell follows the desktop's own theme rather than competing with it.
+;;; Nothing found means the built-in default, so a fresh machine is merely
+;;; less pretty, never broken.
 
 (define-module (scheme-desktop style)
   #:use-module (scheme-toolkit gi)
   #:use-module (scheme-toolkit style)
+  #:use-module (scheme-toolkit palette)
   #:use-module (srfi srfi-11)
-  #:export (apply-shell-css! shell-css shell-provider))
+  #:export (apply-shell-css! shell-css shell-provider shell-palette))
 
-(define shell-css
-  "
-/* The bar itself.  Astal.Window already gets .background from GTK, so this
-   overrides it rather than relying on it. */
+;; The palette in force.  Read once: a theme change is followed by a reload,
+;; not by re-reading the file on every redraw.
+(define %palette #f)
+
+(define (shell-palette)
+  "The palette this machine provides, or the built-in default."
+  (unless %palette
+    (set! %palette (or (read-palette) default-palette)))
+  %palette)
+
+;; A colour from the palette with an alpha applied, since several surfaces want
+;; the background a little translucent and GTK's rgba() is the only way to say
+;; so from a hex value.
+(define (alpha key a)
+  (let ((hex (palette-ref (shell-palette) key)))
+    (if (and hex (string? hex) (char=? (string-ref hex 0) #\#)
+             (= 7 (string-length hex)))
+        (format #f "rgba(~a, ~a, ~a, ~a)"
+                (string->number (substring hex 1 3) 16)
+                (string->number (substring hex 3 5) 16)
+                (string->number (substring hex 5 7) 16)
+                a)
+        hex)))
+
+(define (shell-css)
+  "The whole stylesheet, with the palette's colours substituted into it."
+  (string-append
+   "
+/* ---- the bar ---------------------------------------------------------- */
+
 .Bar {
-  background: rgba(20, 20, 26, 0.92);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: " (alpha 'background 0.92) ";
+  border-bottom: 1px solid " (alpha 'foreground 0.06) ";
   padding: 0 6px;
   font-size: 13px;
+  color: " (palette-ref (shell-palette) 'foreground) ";
 }
 
 /* A bar on the bottom edge needs its border on top.  The class is set by
@@ -36,7 +80,7 @@
    looks like a CSS bug and is an option bug. */
 .Bar.bar-bottom {
   border-bottom: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid " (alpha 'foreground 0.06) ";
 }
 
 .Bar button,
@@ -47,25 +91,24 @@
   min-height: 0;
   padding: 2px 8px;
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.85);
+  color: " (alpha 'foreground 0.85) ";
 }
 
 .Bar button:hover {
-  background: rgba(255, 255, 255, 0.10);
+  background: " (alpha 'foreground 0.10) ";
 }
 
-/* The focused workspace.  This is the class the workspace module toggles; the
+/* The focused workspace.  The class is toggled by the workspaces module; the
    module decides WHICH pill is current, the stylesheet decides what that looks
    like. */
 .Bar .workspace {
   min-width: 22px;
-  font-feature-settings: \"tnum\";
-  color: rgba(255, 255, 255, 0.55);
+  color: " (alpha 'muted 1.0) ";
 }
 
 .Bar .workspace.active {
-  background: rgba(120, 170, 255, 0.85);
-  color: #10131a;
+  background: " (palette-ref (shell-palette) 'accent) ";
+  color: " (palette-ref (shell-palette) 'background) ";
   font-weight: 600;
 }
 
@@ -75,7 +118,7 @@
 
 .Bar .clock {
   font-weight: 600;
-  color: #fff;
+  color: " (palette-ref (shell-palette) 'foreground) ";
   padding: 0 10px;
 }
 
@@ -84,14 +127,26 @@
 }
 
 .Bar .battery-label {
-  font-feature-settings: \"tnum\";
-  color: rgba(255, 255, 255, 0.85);
+  color: " (alpha 'foreground 0.85) ";
 }
 
 .Bar .bar-start, .Bar .bar-end {
   padding: 4px 2px;
 }
-")
+
+/* A battery low enough to matter.  The class comes from the battery module,
+   which is alone in knowing what 'low' means for the current state. */
+.Bar .battery.low .battery-label {
+  color: " (palette-ref (shell-palette) 'red) ";
+}
+
+/* Network and bluetooth share the 'unavailable' convention: present in the
+   layout, dimmed rather than removed, so the bar does not reflow when a device
+   comes and goes. */
+.Bar .unavailable {
+  color: " (alpha 'muted 0.55) ";
+}
+"))
 
 ;; One provider for the whole shell, parsed once and reused by every toplevel.
 ;; The toolkit holds it, so it cannot be collected out from under the windows.
@@ -100,7 +155,7 @@
 (define (shell-provider)
   "The shell's CSS provider, created on first use."
   (unless %provider
-    (let-values (((p errors) (css-provider-for shell-css)))
+    (let-values (((p errors) (css-provider-for (shell-css))))
       (for-each (lambda (e)
                   (format (current-error-port) "scheme-desktop: css: ~a\n" e))
                 errors)
