@@ -101,6 +101,31 @@ window#bar button {
   box-shadow: none;
 }
 
+/* THE HOVER SHADOW HAS TO BE RE-ASSERTED WITH THE SAME ID, and this is a
+ * pure specificity problem rather than a styling choice.
+ *
+ * `window#bar button' scores (1,0,2) -- it contains an ID.  The base rule
+ * `button:hover:not(.active)' scores (0,2,1) -- two classes and an element.
+ * An ID outranks any number of classes, so the flat rule above strips
+ * box-shadow in EVERY state, hover included, and no amount of reordering
+ * fixes it.
+ *
+ * The symptom is worth recognising: a shadow that appears on CLICK and never
+ * on hover.  `:active' survives only because the base stylesheet happens to
+ * name `window#bar button.active' in that selector too, which is why the
+ * circle was visible for the instant of a press and absent otherwise.
+ *
+ * ags2-shell's compiled CSS has this same hole, so this is a second deliberate
+ * difference.  The declarations are its own hover values, unchanged. */
+window#bar button:hover:not(.active) {
+  background-color: var(--hover-bg);
+  color: var(--hover-fg);
+  box-shadow:
+    inset 0 0 0 var(--border-width) var(--border-color),
+    var(--neu-button-hover-highlight),
+    var(--neu-button-hover-shadow);
+}
+
 image {
   -gtk-icon-size: var(--icon-size, 16px);
 }
