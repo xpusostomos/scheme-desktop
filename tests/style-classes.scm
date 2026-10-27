@@ -14,19 +14,77 @@
 (use-modules (srfi srfi-13))
 (use-modules (srfi srfi-64))
 
-(define desktop-root
-  (string-append (dirname (dirname (current-filename))) "/scheme-desktop"))
+;; LOCATING THE CHECKOUT.  The suite is run three ways -- by hand from the repo,
+;; from tests/, and by bin/run-tests from the toolkit repo -- so no single
+;; assumption about the current directory holds, and (current-filename) is
+;; unusable (it is RELATIVE under -s, and #f under -c).
+;;
+;; So a small set of CANDIDATE roots is tried, each checked for a marker file,
+;; and the first that exists wins.  Candidates are the directories the suite is
+;; plausibly run from or installed into, plus an explicit override.
+;;
+;; This is deliberately dumb: it verifies every candidate rather than
+;; deriving one from a path computation, because a path computation that is
+;; subtly wrong fails by producing an empty stylesheet and a check that
+;; silently passes over nothing -- which is worse than an error.
+(define (repo-dir? d)
+  "Is D the scheme-desktop REPO (which holds the package of the same name)?"
+  (and d (file-exists? (string-append d "/scheme-desktop/style.scm"))))
+
+(define (repo-candidates)
+  (let ((cwd (getcwd)))
+    (filter (lambda (c) (and c (not (string=? c ""))))
+            (list
+             ;; An explicit override, for a caller that knows.
+             (getenv "SCHEME_DESKTOP_ROOT")
+             ;; The current directory and a few levels up: covers a run from
+             ;; the repo, from tests/, or from inside the package.
+             cwd
+             (dirname cwd)
+             (dirname (dirname cwd))
+             (dirname (dirname (dirname cwd)))
+             ;; The sibling of wherever we are: a run from the toolkit repo.
+             (string-append cwd "/../scheme-desktop")
+             (string-append (dirname cwd) "/scheme-desktop")
+             (string-append (dirname (dirname cwd)) "/scheme-desktop")
+             ;; The package directory itself.
+             (string-append cwd "/scheme-desktop")))))
+
+(define repo-dir
+  (or (find repo-dir? (repo-candidates))
+      (error "style-classes: cannot find the scheme-desktop checkout; \
+run the suite from that repo, or set SCHEME_DESKTOP_ROOT")))
+
+(define package-dir (string-append repo-dir "/scheme-desktop"))
 
 (define (read-source path)
   (or (read-file path) ""))
 
+(define toolkit-root
+  ;; The SIBLING checkout's package directory.  The two repos sit side by side
+  ;; under a common parent, each holding a module directory of its own name:
+  ;;
+  ;;   <parent>/scheme-desktop/scheme-desktop/    this shell's modules
+  ;;   <parent>/scheme-toolkit/scheme-toolkit/    the toolkit's
+  ;;
+  ;; A class this shell styles may be emitted by a toolkit widget -- the tray
+  ;; moved there -- so the check has to look in both.
+  (string-append (dirname repo-dir) "/scheme-toolkit/scheme-toolkit"))
+
 (define (widget-files)
-  (let ((dir (string-append desktop-root "/widgets")))
+  (let ((dir (string-append package-dir "/widgets")))
     (append
-     (list (string-append desktop-root "/widgets/bar.scm"))
+     (list (string-append package-dir "/widgets/bar.scm"))
      (map (lambda (name) (string-append dir "/bar/" name))
           '("workspaces.scm" "status.scm" "volume.scm" "network.scm"
-            "bluetooth.scm" "media.scm" "clock.scm")))))
+            "bluetooth.scm" "media.scm" "clock.scm"))
+     ;; TOOLKIT widgets too.  The tray moved there -- it is protocol handling
+     ;; rather than a decision this shell made -- and it emits `tray',
+     ;; `tray-item', `tray-menu', `model-item' and `check'.  Without this the
+     ;; check would report every class the tray styles as unemitted, which is
+     ;; the opposite of the truth.
+     (map (lambda (name) (string-append toolkit-root "/" name))
+          '("tray.scm" "widget.scm")))))
 
 ;; Every `.name' that appears in a SELECTOR.  Scanning for the `.name' shape
 ;; rather than parsing selectors properly: the question here is only "does any
@@ -35,7 +93,7 @@
 ;; '{' on the same line, so a value like rgba(0,0,0,.5) cannot look like a
 ;; class.
 (define (stylesheet-class-names)
-  (let* ((css (read-source (string-append desktop-root "/style.scm")))
+  (let* ((css (read-source (string-append package-dir "/style.scm")))
          (selector-text
           (string-join
            (filter-map (lambda (line)
@@ -98,16 +156,16 @@
   (for-each
    (lambda (class)
      (test-assert (format #f "~a is styled" class)
-       (string-contains (read-source (string-append desktop-root "/style.scm"))
+       (string-contains (read-source (string-append package-dir "/style.scm"))
                         (string-append "." class))))
    '("battery" "battery-label" "clock" "workspace" "bar-start" "bar-end"))
   (test-assert "the low-battery state class is styled"
-    (string-contains (read-source (string-append desktop-root "/style.scm"))
+    (string-contains (read-source (string-append package-dir "/style.scm"))
                      ".battery.low"))
   (test-assert "and emitted"
     (emitted? "low"))
   (test-assert "the unavailable state class is styled"
-    (string-contains (read-source (string-append desktop-root "/style.scm"))
+    (string-contains (read-source (string-append package-dir "/style.scm"))
                      ".unavailable"))
   (test-assert "and emitted"
     (emitted? "unavailable")))

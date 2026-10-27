@@ -156,38 +156,52 @@ tooltip label {
     var(--neu-widget-shadow);
 }
 
-/* ---- popovers, including the tray's menus ----------------------------- */
+/* ---- popovers: the tray's menus and the bar's own ---------------------- */
 
-popover.menu {
+/* THE SELECTOR IS `window#bar popover contents', NOT `popover.menu > contents',
+ * and that is not a style preference.
+ *
+ * `popover.menu' matches a Gtk.PopoverMenu -- GTK gives one that class.  A
+ * plain Gtk.Popover has NO class at all, and the tray's menus are plain
+ * popovers (they have to be: PopoverMenu cannot render a DBusMenuModel).
+ * So a `popover.menu' selector matches NOTHING for a tray menu, and every rule
+ * written that way is dead text -- which is what made the menu opaque, in the
+ * wrong colour, with the wrong corners.  ags2-shell's own selector is
+ * `window#bar popover contents', which matches both.
+ *
+ * The bare `popover' rules below are for the MENU container -- GTK draws its
+ * own background and shadow behind the contents, and they have to be cleared or
+ * a square shows through the rounded corners. */
+window#bar popover {
   background: transparent;
   box-shadow: none;
   border: none;
 }
 
-popover.menu > arrow {
+window#bar popover > arrow {
   background: transparent;
   box-shadow: none;
   border: none;
 }
 
-popover.menu > contents {
+window#bar popover contents {
   box-shadow: 0 0 5px 0 var(--shadow-color);
   margin: max(var(--spacing), 8px);
+  margin-top: calc(max(var(--spacing), 8px) + var(--padding) * 0.3);
   border: var(--border-width) solid var(--popover-border-color);
   background-color: var(--bg);
   color: var(--fg);
   border-radius: calc(var(--popover-radius) / 2);
   padding: calc(var(--padding) / 2);
-  min-width: 180px;
 }
 
-popover.menu > contents stack,
-popover.menu > contents box {
-  padding: 0;
-  margin: 0;
+/* The tray's own menu box.  min-width is their value, and the padding on a row
+ * is what gives a menu its height. */
+window#bar popover contents .tray-menu {
+  min-width: calc(180px * var(--scale, 1));
 }
 
-popover.menu > contents modelbutton {
+window#bar popover contents button.model-item {
   background-color: transparent;
   box-shadow: none;
   transition: var(--transition);
@@ -198,23 +212,22 @@ popover.menu > contents modelbutton {
   margin: 0;
 }
 
-popover.menu > contents modelbutton:focus-visible:hover {
-  outline: none;
+window#bar popover contents button.model-item:hover:not(.active) {
+  background-color: var(--hover-bg);
+  color: var(--hover-fg);
 }
 
-popover.menu > contents modelbutton check,
-popover.menu > contents modelbutton radio,
-popover.menu > contents modelbutton arrow {
-  min-width: 0;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
+/* The tick sits before the label; the gap is what stops it touching the text. */
+window#bar popover contents .tray-menu button.model-item .check {
+  margin-right: calc(var(--spacing) / 2);
 }
 
-popover.menu > contents modelbutton .accelerator {
-  color: color-mix(in srgb, var(--fg) 60%, transparent);
-  font-size: 0.9em;
-  margin-left: calc(var(--spacing) / 2);
+/* The dividing rule between menu sections.  Without this the separator has no
+ * height and is invisible, which is why the line before Quit was missing. */
+window#bar popover contents .tray-menu separator {
+  margin: calc(var(--radius) / 2);
+  min-height: 1px;
+  background-color: color-mix(in srgb, var(--fg) 20%, transparent);
 }
 
 popover.menu > contents separator {
