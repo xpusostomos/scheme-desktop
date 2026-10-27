@@ -23,7 +23,16 @@ TOOLKIT_ROOT="$(dirname "$DESKTOP_ROOT")/scheme-toolkit"
 
 case "${1:-run}" in
     run)
-        shift || true
+        # Guard the shift.  Bare `shift' with no positional arguments fails
+        # ("shift count out of range"), which is the NORMAL case for
+        # `scheme-desktop' with no arguments -- the default is run.  `|| true'
+        # kept it from aborting but still printed the message, so every plain
+        # start showed a spurious error before the shell came up.
+        #
+        # Written as an if rather than `[ $# -gt 0 ] && shift': the && form
+        # returns non-zero when there is nothing to shift, and under `set -e'
+        # that aborts the script -- which is the very case this is fixing.
+        if [ $# -gt 0 ]; then shift; fi
         # scheme-toolkit run supplies the environment and the toolkit's load
         # path; -L adds this checkout so (scheme-desktop ...) resolves.
         exec "$TOOLKIT_ROOT/bin/scheme-toolkit" guile \
