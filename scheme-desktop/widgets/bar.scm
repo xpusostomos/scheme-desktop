@@ -15,8 +15,8 @@
   #:use-module (scheme-toolkit reactive)
   #:use-module (scheme-toolkit widget)
   #:use-module (scheme-toolkit app)
-  #:use-module (scheme-toolkit process)
   #:use-module (scheme-toolkit time)
+  #:use-module (scheme-toolkit tray)
   ;; The bar's own modules, one file each, as colorshell's bar/widgets/ is.
   #:use-module (scheme-desktop widgets bar workspaces)
   #:use-module (scheme-desktop widgets bar status)
@@ -77,13 +77,10 @@ anchored to one edge and styled for the other."
     (bluetooth  . ,bluetooth-widget)
     (volume     . ,volume-widget)
     (battery    . ,battery-widget)
-    (welcome    . ,(lambda ()
-                     (element <gtk-button>
-                              #:label "Welcome"
-                              #:class "bar-button"
-                              #:on-clicked (lambda (b)
-                                             (exec-async '("notify-send"
-                                                           "hello from Scheme"))))))
+    ;; The tray comes from the toolkit: StatusNotifier handling, the menu-model
+    ;; plumbing and the action-group requirement are the same for any shell, so
+    ;; only the CSS class and icon size are decided here.
+    (tray       . ,(lambda () (tray-widget #:class "tray" #:item-class "tray-item")))
     (calendar   . ,(lambda ()
                      (element <gtk-menu-button>
                               #:class "bar-button"

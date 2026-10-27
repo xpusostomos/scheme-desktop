@@ -52,9 +52,9 @@ macro so the error a user sees names the option, not a closure."
   ;; Which modules appear, and in which order, per section.  A list of symbols
   ;; rather than a boolean per widget: adding a widget then means naming it in
   ;; the list, and there is no second place to keep in sync.
-  (bar-start           (workspaces welcome)  (list-of symbol?))
+  (bar-start           (workspaces)  (list-of symbol?))
   (bar-center          (media clock)         (list-of symbol?))
-  (bar-end             (network bluetooth volume battery calendar)
+  (bar-end             (tray network bluetooth volume battery calendar)
                        (list-of symbol?))
 
   ;; --- widgets ---------------------------------------------------------

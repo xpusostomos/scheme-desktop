@@ -146,6 +146,35 @@
 .Bar .unavailable {
   color: " (alpha 'muted 0.55) ";
 }
+
+/* The tray.  Its items are the applications' own icons, so the button must add
+   nothing of its own -- no background, no border, and just enough padding to
+   make them clickable.  The tray box hides itself while empty, so this padding
+   is never visible on a desktop with no tray items. */
+.Bar .tray {
+  padding: 0 4px;
+}
+
+.Bar .tray-item {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  min-height: 0;
+  min-width: 0;
+  padding: 1px 3px;
+  border-radius: 4px;
+}
+
+.Bar .tray-item:hover {
+  background: " (alpha 'foreground 0.10) ";
+}
+
+/* NO -gtk-icon-style HERE, deliberately.  Tray icons come from the
+   applications: some are symbolic and theme correctly, others are full-colour
+   (measured on this machine: JetBrains Toolbox and Syncthing ship colour
+   icons).  Forcing symbolic reinterprets the colour ones and renders them as
+   blank or wrong.  The arrow a menu button normally draws IS suppressed, but
+   that is set on the widget (always-show-arrow #f), not here. */
 "))
 
 ;; One provider for the whole shell, parsed once and reused by every toplevel.
