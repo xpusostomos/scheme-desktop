@@ -7,6 +7,7 @@
 # (scheme-desktop ...) resolves alongside (scheme-toolkit ...).
 #
 #   run [args]   start the shell
+#   gdb [args]   the same, under gdb; prints a backtrace when the shell stops
 #   eval EXPR    evaluate an expression in the running shell (later: D4)
 
 set -e
@@ -39,6 +40,15 @@ case "${1:-run}" in
              -L "$DESKTOP_ROOT" \
              -e main -s "$DESKTOP_ROOT/scheme-desktop/shell.scm" "$@"
         ;;
+    gdb)
+        if [ $# -gt 0 ]; then shift; fi
+        # NO -L HERE, unlike `run': the toolkit's own load_args adds an -L for
+        # every sibling checkout, so (scheme-desktop ...) already resolves, and
+        # passing the file as the target is what the toolkit's `gdb' wants.
+        exec "$TOOLKIT_ROOT/bin/scheme-toolkit" gdb \
+             "$DESKTOP_ROOT/scheme-desktop/shell.scm" "$@"
+        ;;
+
     *)
         # Everything else is scheme-toolkit's (eval, repl, list, check-env).
         exec "$TOOLKIT_ROOT/bin/scheme-toolkit" "$@"

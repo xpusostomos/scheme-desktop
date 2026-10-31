@@ -1,0 +1,72 @@
+#!/usr/bin/guile
+!#
+;;; omarchy-menu-to-scheme -- write an Omarchy menu file out as Scheme source.
+;;;
+;;;   bin/omarchy-menu-to-scheme [OPTIONS] [FILE]
+;;;
+;;; FILE defaults to Omarchy's installed omarchy-menu.jsonc. Output goes to
+;;; stdout unless -o is given.
+;;;
+;;; THIS IS ONLY THE FILE-LEVEL WRAPPER. Reading the JSONC and turning it into a
+;;; menu is (scheme-desktop menu omarchy), which returns DATA -- a list of
+;;; property lists -- and is what a shell should load and run on directly.
+;;; Rendering that data as text is one more call in the same module. Nothing
+;;; here does any conversion; if the two ever disagree about the menu, the
+;;; module is right.
+;;;
+;;; Kept as a separate program because converting is a build step with a human
+;;; in it: the output is 333 rows of arbitrary shell commands, and that is not
+;;; something to hand a running process unseen.
+
+;; Find our own module without depending on the caller's environment. The
+;; toolkit has a wrapper that sets -L; this tool deliberately has no toolkit
+;; dependency, so it resolves its own root instead.
+(eval-when (expand load eval)
+  (let* ((self (or (current-filename) (car (command-line))))
+         (root (dirname (dirname (canonicalize-path self)))))
+    (set! %load-path (cons root %load-path))))
+
+(use-modules (ice-9 format)
+             (scheme-desktop menu omarchy))
+
+(define (usage)
+  (display "usage: omarchy-menu-to-scheme [-n NAME] [-o FILE] [--stats] [INPUT]\n")
+  (exit 0))
+
+(define (main args)
+  (let loop ((args args)
+             (name "omarchy-menu")
+             (out-file #f)
+             (input omarchy-menu-default-path)
+             (stats? #f))
+    (cond
+     ((null? args)
+      ;; The module reports through a parameter rather than printing, so that a
+      ;; shell can read a menu quietly. Here we want to hear everything.
+      (omarchy-menu-warn
+       (lambda (fmt . rest)
+         (apply format (current-error-port) (string-append fmt "\n") rest)))
+      (let* ((menu (omarchy-menu-file->scheme input))
+             (text (omarchy-menu->string menu #:name name))
+             (warnings (omarchy-menu-warnings)))
+        (if out-file
+            (call-with-output-file out-file (lambda (port) (display text port)))
+            (display text))
+        (when stats?
+          (format (current-error-port) "~a: ~a rows, ~a warnings~%"
+                  input (omarchy-menu-count menu) (length warnings)))
+        ;; A build step that saw a problem should be able to fail on it.
+        (when (pair? warnings) (exit 2))))
+     ((member (car args) '("-h" "--help")) (usage))
+     ((member (car args) '("-n" "--name"))
+      (loop (cddr args) (cadr args) out-file input stats?))
+     ((member (car args) '("-o" "--output"))
+      (loop (cddr args) name (cadr args) input stats?))
+     ((member (car args) '("-s" "--stats"))
+      (loop (cdr args) name out-file input #t))
+     ((string-prefix? "-" (car args))
+      (format (current-error-port) "unknown option: ~a~%" (car args))
+      (exit 1))
+     (else (loop '() name out-file (car args) stats?)))))
+
+(main (cdr (command-line)))

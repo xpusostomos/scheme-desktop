@@ -10,6 +10,9 @@
 
 (use-modules (scheme-toolkit gi))
 (use-modules (scheme-toolkit file))
+;; `scandir'. Its absence was silently swallowed by the catch around it, which
+;; made the checker find no files at all and report every class unemitted.
+(use-modules (ice-9 ftw))
 (use-modules (srfi srfi-1))
 (use-modules (srfi srfi-13))
 (use-modules (srfi srfi-64))
@@ -71,20 +74,54 @@ run the suite from that repo, or set SCHEME_DESKTOP_ROOT")))
   ;; moved there -- so the check has to look in both.
   (string-append (dirname repo-dir) "/scheme-toolkit/scheme-toolkit"))
 
+;; EVERY .scm UNDER THE WIDGETS, FOUND BY LOOKING.
+;;
+;; This was a hand-written list of file names, and it went stale exactly as a
+;; hand-written list does: it still named `bar/network.scm' after that file was
+;; deleted and the widget moved, and it never covered the window modules at all
+;; -- so every class belonging to the date menu, the menu and the workspace
+;; picker was reported as unemitted, which is the opposite of the truth.  A
+;; class that looks unemitted because the checker cannot see the file it is in
+;; is worse than no check.
+;;
+;; WRITTEN WITH NAMED `let' AND NOTHING ELSE.  `(scheme-toolkit gi)' rebinds
+;; `map', `append', `member' and `for-each' to GTK generics in whatever module
+;; imports it, and `append-map' and `scandir' both call `map' internally -- so
+;; the obvious version of this function failed with
+;;
+;;   wrong-type-arg ("map" "Wrong type argument" (#f))
+;;
+;; inside a catch, which returned no files at all and reported every class in
+;; the stylesheet as unemitted.  The shadowing is the project's known trade-off;
+;; this is the price, paid in one place.
+;; `scandir' ON A FILE RETURNS #f RATHER THAN THROWING, so a catch-based
+;; "is this a directory" test answers yes for every file -- and the recursion
+;; then walks into one and dies on `(car #f)'.  A directory is a directory
+;; because `scandir' handed back a list, and that is the test.
+(define (safe-scandir dir)
+  (let ((r (catch #t (lambda () (scandir dir)) (lambda args #f))))
+    (if (list? r) r '())))
+
+(define (scm-files-into dir out)
+  (let loop ((names (safe-scandir dir)) (out out))
+    (cond ((null? names) out)
+          (else
+           (let* ((name (car names))
+                  (path (string-append dir "/" name)))
+             (loop (cdr names)
+                   (cond ((or (string=? name ".") (string=? name "..")) out)
+                         ((string-suffix? ".scm" name) (cons path out))
+                         ;; Not a .scm file: a directory, or something to
+                         ;; ignore.  `safe-scandir' answers '() for both, so
+                         ;; only a real directory is descended into.
+                         ((null? (safe-scandir path)) out)
+                         (else (scm-files-into path out)))))))))
+
 (define (widget-files)
-  (let ((dir (string-append package-dir "/widgets")))
-    (append
-     (list (string-append package-dir "/widgets/bar.scm"))
-     (map (lambda (name) (string-append dir "/bar/" name))
-          '("workspaces.scm" "status.scm" "volume.scm" "network.scm"
-            "bluetooth.scm" "media.scm" "clock.scm"))
-     ;; TOOLKIT widgets too.  The tray moved there -- it is protocol handling
-     ;; rather than a decision this shell made -- and it emits `tray',
-     ;; `tray-item', `tray-menu', `model-item' and `check'.  Without this the
-     ;; check would report every class the tray styles as unemitted, which is
-     ;; the opposite of the truth.
-     (map (lambda (name) (string-append toolkit-root "/" name))
-          '("tray.scm" "widget.scm")))))
+  (scm-files-into
+   toolkit-root
+   (cons (string-append package-dir "/widgets.scm")
+         (scm-files-into (string-append package-dir "/widgets") '()))))
 
 ;; Every `.name' that appears in a SELECTOR.  Scanning for the `.name' shape
 ;; rather than parsing selectors properly: the question here is only "does any
@@ -143,9 +180,16 @@ run the suite from that repo, or set SCHEME_DESKTOP_ROOT")))
        ;;                it is legitimate and no file of ours names it, so the
        ;;                test's premise ("a widget says this") does not hold.
        ;;
+       ;;   day-name, other-month
+       ;;                emitted by Gtk.Calendar itself, on the labels it
+       ;;                builds for its own grid.  The dates in a month other
+       ;;                than the current one carry `other-month', the weekday
+       ;;                headings carry `day-name' -- and both are GTK's to
+       ;;                emit, so no file of ours names them.
+       ;;
        ;; Anything else is still a failure: that IS how the styled-but-never-
        ;; emitted classes .battery.low and .unavailable were caught.
-       (unless (member class '("Bar" "accelerator"))
+       (unless (member class '("Bar" "accelerator" "day-name" "other-month"))
          (test-assert (format #f "~a is emitted somewhere" class)
            (emitted? class))))
      classes)))

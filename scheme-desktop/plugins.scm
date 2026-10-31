@@ -16,7 +16,7 @@
 (define-module (scheme-desktop plugins)
   #:use-module (scheme-toolkit gi)
   #:use-module (scheme-toolkit launcher)
-  #:use-module (scheme-toolkit astal)
+  #:use-module (scheme-toolkit service-helpers)
   #:use-module (scheme-toolkit process)
   #:use-module (scheme-toolkit file)
   #:use-module (scheme-toolkit result)

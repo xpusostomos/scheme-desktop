@@ -8,59 +8,79 @@
 
 (use-modules (scheme-toolkit gi))
 (use-modules (scheme-toolkit app))
+;; THE SHELL CHOOSES ITS COMPOSITOR, by loading one implementation of
+;; (scheme-desktop wm). Nothing else names Hyprland: the widgets ask `wm' for
+;; monitors, workspaces and clients and would work unchanged on another.
+(use-modules (scheme-desktop wm hyprland))
 (use-modules (scheme-desktop style))
+(use-modules (scheme-desktop widgets))      ; the root, and the shipped set
 (use-modules (scheme-desktop widgets bar))
+;; For `shell-config-file' and the one line that starts the widget config.
+(use-modules (scheme-desktop config))
 ;; Imported for its side effect of being loaded, so that a keybinding's
 ;; (scheme-desktop api) expression resolves over the REPL.  Nothing here calls
 ;; it -- the shell's own vocabulary is called FROM outside.
 (use-modules (scheme-desktop api))
 
-;; `guile -e main -s FILE' calls MAIN with ONE argument: the script's own
-;; command line, as a list of strings.  A zero-argument main is the natural
-;; thing to write and fails with "Wrong number of arguments to #<procedure
-;; main ()>" -- after every module has loaded, so it reads like a deeper
-;; problem than it is.
-(define* (build-all-bars! #:key (force? #f))
-  ;; for-each-monitor keys a root per monitor, so a hotplug builds a bar for the
-  ;; monitor that arrived and disposes the one that left.  A REBUILD passes
-  ;; force?: the roots already exist, so without it nothing would be built and
-  ;; the bar would simply disappear.
-  (for-each-monitor
-   (lambda (monitor name)
-     (build-bar! monitor #:name "bar"))
-   #:force? force?))
+;; THE REBUILD LIVES IN (scheme-desktop reload).  It moved there because this
+;; file calls `(run-shell ...)' at the bottom, so importing it starts a shell --
+;; and anything defined here could only be tested by starting one.
+;;
+;; `build-all-bars!` and `reload-shell!` were both defined here, and
+;; `watch-bar-layout!` below carried a THIRD copy of the same destroy-and-rebuild.
+;; That third one had the bug `reload-shell!` had already been fixed for: it
+;; presented every window rather than only the visible ones.
+(use-modules (scheme-desktop reload))
 
 (define (main . args)
-  (build-all-bars!)
-
-  ;; Options that decide the bar's SHAPE apply on a rebuild rather than in
-  ;; place -- moving the bar to the other edge means re-anchoring the layer
-  ;; surface, and a changed module list means different children.  Options a
-  ;; widget binds to directly (clock-format) need nothing here: the label is
-  ;; subscribed to the accessor.
+  ;; THE ROOT FIRST, AND IT MAKES EVERYTHING ELSE.  It is the one widget this
+  ;; shell creates by hand -- it cannot be in its own list, so somebody has to
+  ;; put it there -- and `root-start!' then does the two things a custodian does:
+  ;; makes the live set match the list, and subscribes to the list so that
+  ;; changing it changes the set.
   ;;
-  ;; Rebuilding is cheap and blunt on purpose.  The alternative is diffing two
-  ;; widget trees, which would cost more complexity than a bar is worth.
-  (watch-bar-layout!
-   (lambda ()
-     ;; Only the bars, on purpose: the option being watched is a bar option, and
-     ;; destroying every window in the registry would take out anything else
-     ;; that happened to be registered under another name.
-     (catch #t
-       (lambda ()
-         (destroy-windows! "bar")
-         (build-all-bars! #:force? #t)
-         ;; Present the new windows.  run-shell presents only on the
-         ;; application's ACTIVATE, which fires once, so without this the
-         ;; rebuilt bar is registered, visible in the registry, and has no
-         ;; surface at all -- the windows exist and nothing is on screen.
-         (for-each (lambda (w)
-                     (catch #t (lambda () (present w)) (lambda args #f)))
-                   (windows)))
-       (lambda (key . rest)
-         ;; A failed rebuild must not take the shell down: the bar is gone but
-         ;; the process still has a REPL, which is where the fix gets made.
-         (format (current-error-port)
-                 "scheme-desktop: cannot rebuild the bar: ~a ~s~%" key rest))))))
+  ;; BY HAND, AND HERE RATHER THAN AT LOAD, because loading is what makes the
+  ;; classes exist and the list is data: a registry filled at import is a
+  ;; registry filled before anyone can have an opinion, which is what this
+  ;; replaced.
+  ;;
+  ;; BEFORE THE CONFIG, because the widgets the file's options belong to have to
+  ;; exist before it is read.  The bar is one of them now -- it used to be built
+  ;; by hand here for that reason, and it comes out of the root like the rest.
+  (register-desktop-widget! (make <desktop-root-widget>))
+  ;; AND IT IS HANDED THE REBUILD, because changing the list is a model change
+  ;; and the views have to follow: the root syncs the registry, then calls this,
+  ;; and this is the same rebuild a changed bar layout option uses.  Without it
+  ;; the registry loses a widget the trees still point at -- measured, and it
+  ;; does not warn, it segfaults.
+  ;; NO `#:on-change'.  A change to the list used to rebuild the shell; now the
+  ;; root syncs the registry and every widget that built something out of it
+  ;; re-looks -- the bar reconciles its sections -- so there is nothing for the
+  ;; shell to do and no rebuild to ask for.
+  (root-start! (desktop-widget-required 'root))
+  ;; WITH THE REBUILD, so an edit to the config file rebuilds the shell.  The
+  ;; loading and the watching are (scheme-utils)'s; the rebuild is ours, and
+  ;; handing it over here is the whole of what this shell supplies -- see
+  ;; (scheme-desktop config), which also says where a config loads to.
+  (start-shell-config! reload-shell!)
+  (build-all-bars!)
+  ;; AND FOLLOW THE DESKTOP'S THEME WHILE WE RUN.  The stylesheet is generated
+  ;; from the palette, the palette is a file the desktop rewrites when the
+  ;; wallpaper or theme changes, and until this line nothing watched it -- so the
+  ;; shell was themed once at startup and never again.
+  (watch-theme-file!)
+  ;; Then the windows the bar's modules own -- the date menu, and later the
+  ;; launcher and the control centre.  Built once rather than per monitor: a
+  ;; popup follows the focused monitor instead of existing on every one.
+  (build-bar-windows!)
+
+  ;; A CHANGE TO A LAYOUT OPTION REBUILDS, the same as a change to the file.
+  ;; This used to be its own copy of the sequence, which is how it came to miss
+  ;; the fix for presenting every window.  One rebuild, called from two places.
+  ;; NOTHING ELSE TO WIRE.  Every bar option applies itself now -- see the end of
+  ;; (scheme-desktop widgets bar) -- so there is no list of options that rebuild
+  ;; the shell and no hook to register a rebuild in.  What is left here is the
+  ;; startup: the root, the config, the bars, the panels.
+  #t)
 
 (run-shell #:instance "scheme-desktop" #:main main)

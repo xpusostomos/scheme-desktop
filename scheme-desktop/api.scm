@@ -15,23 +15,57 @@
 (define-module (scheme-desktop api)
   #:use-module (scheme-toolkit gi)
   #:use-module (scheme-toolkit app)
-  #:use-module (scheme-toolkit astal)
+  #:use-module (scheme-toolkit service-helpers)
+  #:use-module (scheme-toolkit services wireplumber)
   #:use-module (scheme-toolkit process)
   #:use-module (scheme-toolkit result)
+  ;; The menu's two entry points are IMPORTED so they can be RE-EXPORTED. A
+  ;; `#:export' of a name this module does not bind is a name the shell's REPL
+  ;; then cannot see -- and since (guile-user) is what the REPL evaluates in,
+  ;; anything a keybinding needs has to arrive there through this module.
+  #:use-module ((scheme-desktop widgets menu)
+                #:select (menu-activate toggle-menu menu-move! menu-descend!
+                          menu-ascend! menu-path menu-selected))
+  ;; For `reload!'.  Nothing happens when this module is imported -- the rebuild
+  ;; lives there precisely so that importing it does not start a shell.
+  #:use-module (scheme-desktop reload)
   #:use-module (oop goops)
   #:use-module (ice-9 format)
 
-  #:re-export (toggle-window window windows quit-shell)
+  ;; `toggle-widget` and `shell-windows` replace `toggle-window`, `window` and
+  ;; `windows`: a keybinding names a widget now, not a window.
+  #:re-export (toggle-widget shell-windows quit-shell
+              menu-activate toggle-menu menu-move! menu-descend!
+              menu-ascend! menu-path menu-selected)
   #:export (volume-up! volume-down! volume-mute!
             media-play-pause! media-next! media-previous!
             screenshot screenshot-area
             launcher-search launcher-run-first!
             notification-status
-            describe-state))
+            describe-state
+            reload!))
 
 ;;; ---------------------------------------------------------------------------
-;;; Volume
+;;; The shell itself
 ;;; ---------------------------------------------------------------------------
+
+(define (reload!)
+  "Tear the shell down and build it again from the config files, now.
+
+THE ONLY WAY a change to config.scm takes effect while the shell is running.
+That file is deliberately NOT watched -- see `start-shell-config!' in
+(scheme-desktop config) -- because the engine writes it whenever an option
+changes, so a watch on it means the shell reloading itself in response to its
+own save.  The file that holds the shell's values is therefore the one file
+nobody is told about, and this is how a config editor, a keybinding or a test
+asks for it anyway:
+
+    scheme-toolkit eval -i scheme-desktop '(reload!)'
+
+A change to init.scm needs no call.  That file IS watched, and a change to it
+reloads on its own -- it holds code the user writes, so a change to it is always
+genuinely the user's."
+  (reload-shell!))
 
 (define (sink)
   "The default sink object, or #f when there is no audio server."
@@ -177,16 +211,19 @@ like a quiet desktop."
 (define* (describe-state #:optional (port (current-output-port)))
   "Print what the shell currently holds.  The first thing to reach for from a
 keybinding when something looks wrong."
-  ;; windows-named gives (name . window), which is what is worth reporting: the
-  ;; registry keeps several windows per name (one bar per monitor).
-  (format port "windows:\n")
-  (for-each (lambda (name)
-              (for-each (lambda (pair)
-                          (format port "  ~a  ~a~%"
-                                  name
-                                  (if (window-visible? (cdr pair)) "visible" "hidden")))
-                        (windows-named name)))
-            (catch #t (lambda () (window-names)) (lambda args '())))
+  ;; THE WIDGETS, WITH HOW MANY WINDOWS EACH HOLDS.  There is no window
+  ;; registry any more, so this reports what actually exists: the widget, and
+  ;; its windows -- a bar showing "2" is a two-monitor bar.
+  (format port "widgets:\n")
+  (for-each (lambda (w)
+              (let ((wins (if (is-a? w <window-widget>) (widget-windows w) '())))
+                (format port "  ~a~a~a~%"
+                        (widget-name w)
+                        (if (is-a? w <window-widget>)
+                            (format #f "  (~a window~p)" (length wins) (length wins))
+                            "  (bar item)")
+                        (if (and (pair? wins) (widget-visible? w)) "  visible" ""))))
+            (catch #t (lambda () (desktop-widgets)) (lambda args '())))
   (format port "monitors: ~a~%" (length (monitors)))
   ;; Reported here because it is the one piece of state that looks identical
   ;; when broken: a shell that cannot see notifications shows an empty list,
@@ -199,3 +236,24 @@ keybinding when something looks wrong."
                 (if ((module-ref iface 'repl-running?)) "running" "stopped")))
             (lambda args "not loaded")))
   #t)
+
+
+;;; ---------------------------------------------------------------------------
+;;; The menu
+;;; ---------------------------------------------------------------------------
+;;
+;; `toggle-menu' and `menu-activate' come from (scheme-desktop widgets menu) and
+;; are re-exported here rather than defined: the window owns the state they act
+;; on, and a second copy of "where am I in the menu" in this module would be a
+;; second thing to keep in step.
+;;
+;; That matters for the keybinding, which is the point of this module:
+;;
+;;   bind = SUPER, SPACE, exec, scheme-toolkit eval -i scheme-desktop '(toggle-menu)'
+;;   bind = SUPER, ESCAPE, exec, scheme-toolkit eval -i scheme-desktop '(menu-activate (quote (system)))'
+;;
+;; and anything not anticipated is one expression away, because these are
+;; procedures and not verbs:
+;;
+;;   (menu-activate '(setup default browser))
+;;   (menu-activate '(system lock))

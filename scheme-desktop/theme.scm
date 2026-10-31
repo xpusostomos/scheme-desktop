@@ -26,6 +26,13 @@
 (define-module (scheme-desktop theme)
   #:use-module (scheme-toolkit gi)
   #:use-module (scheme-toolkit palette)
+  ;; For the bar's own options: `icon-button-size' is the bar's, read here when
+  ;; the stylesheet is generated.
+  #:use-module (scheme-toolkit app)
+  ;; The theme widget, which owns `ui-scale'.  Importing the widget rather than
+  ;; the shell's config module is the point: the option's reader and the
+  ;; option's declaration are now the same module.
+  #:use-module (scheme-desktop widgets theme)
   #:use-module (ice-9 format)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-13)
@@ -43,13 +50,32 @@
 ;; These are not CSS variables in their system -- they are computed in
 ;; TypeScript and emitted as numbers -- so they live here as ordinary values.
 
-(define %padding 8)
-(define %spacing 6)
-(define %radius 12)
-(define %border-width 1)
+(define %base-padding 8)
+(define %base-spacing 6)
+(define %base-radius 12)
+(define %base-border-width 1)
 (define %transition 200)
-(define %font-size 11)
-(define %icon-size 16)
+(define %base-font-size 11)
+(define %base-icon-size 16)
+
+;; THE ONE NUMBER THAT SCALES THE SHELL.
+;;
+;; Everything the stylesheet sizes is multiplied by it, so the text and the
+;; boxes around it grow together. Raising only the font size is the obvious
+;; thing to reach for and the wrong one: the labels then outgrow their padding
+;; and the bar looks cramped rather than bigger.
+;;
+;; Read on every call, not captured at load: a module's top-level defines run
+;; once, and this is meant to be changeable from the config file.
+(define (ui-scale)
+  (catch #t
+    (lambda () (theme-scale (theme-widget)))
+    (lambda args 1.0)))
+
+;; Rounded, and never below 1: a 0.4px border is not a thin border, it is a
+;; border that is not drawn, and a 0pt font is not a small font.
+(define (scaled n)
+  (inexact->exact (max 1 (round (* n (ui-scale))))))
 (define %scale 1.0)
 (define %font-name "Sans")
 
@@ -181,6 +207,35 @@ explicit rather than a rename: omarchy's `background' is their `bg', its
 ;;; Emission
 ;;; ---------------------------------------------------------------------------
 
+(define %default-icon-button-size 24)
+
+(define (icon-button-size)
+  "The bar's icon-button size in pixels, for `--icon-button-size'.
+
+READ OFF THE BAR WIDGET, which owns the option, rather than declared here: this
+is the value the stylesheet is generated from, and generating it at the moment it
+is asked for is what makes changing the option a restyle."
+  (let ((bar (catch #t (lambda () (desktop-widget-named 'bar)) (lambda args #f))))
+    (or (and bar (catch #t (lambda () (slot-ref bar 'icon-button-size))
+                        (lambda args #f)))
+        %default-icon-button-size)))
+
+(define %default-panel-opacity 0.92)
+
+(define (panel-opacity)
+  "How opaque a panel's background is, from the shell's own option.
+
+A GLOBAL VALUE FOR PANELS, because they are all the same kind of surface and
+setting four of them separately is four chances to disagree.  The bar has had an
+`opacity' option all along; this is its counterpart for the windows that open.
+
+`color-mix' rather than an rgba literal: the palette is sRGB hex, and mixing it
+towards transparent keeps whatever hue the wallpaper chose."
+  (let ((theme (catch #t (lambda () (desktop-widget-named 'theme)) (lambda args #f))))
+    (let ((v (and theme (catch #t (lambda () (slot-ref theme 'panel-opacity))
+                               (lambda args #f)))))
+      (if (and (number? v) (>= v 0.2) (<= v 1)) v %default-panel-opacity))))
+
 (define (theme-vars)
   "Every variable ags2-shell emits, in its order, as a string.
 
@@ -196,23 +251,32 @@ ags2-shell's `*' rule does too."
                  ("--primary-bg" . ,(primary-bg))
                  ("--primary-fg" . ,(primary-fg))
                  ("--error-bg" . ,(error-bg))
-                 ("--padding" . ,(format #f "~apt" %padding))
-                 ("--spacing" . ,(format #f "~apt" %spacing))
-                 ("--radius" . ,(format #f "~apx" %radius))
+                 ("--padding" . ,(format #f "~apt" (scaled %base-padding)))
+                 ("--spacing" . ,(format #f "~apt" (scaled %base-spacing)))
+                 ("--radius" . ,(format #f "~apx" (scaled %base-radius)))
                  ("--transition" . ,(format #f "~ams" %transition))
-                 ("--border-width" . ,(format #f "~apx" %border-width))
-                 ("--font-size" . ,(format #f "~apt" %font-size))
-                 ("--icon-size" . ,(format #f "~apx" %icon-size))
+                 ("--border-width" . ,(format #f "~apx" (scaled %base-border-width)))
+                 ("--font-size" . ,(format #f "~apt" (scaled %base-font-size)))
+                 ("--icon-size" . ,(format #f "~apx" (scaled %base-icon-size)))
+                 ;; WHAT A PANEL IS PAINTED WITH, for every panel.  The windows
+                 ;; themselves are transparent -- a popup covers the screen and
+                 ;; painting it would dim the desktop -- so each panel's CARD
+                 ;; carries this.
+                 ("--panel-bg" . ,(format #f "color-mix(in srgb, ~a ~a%, transparent)"
+                                          (bg) (inexact->exact (round (* 100 (panel-opacity))))))
+                 ;; The hover circle behind a bar icon: one number for the whole
+                 ;; bar, from the bar's own option.
+                 ("--icon-button-size" . ,(format #f "~apx" (scaled (icon-button-size))))
                  ("--scale" . ,(format #f "~a" %scale))
                  ("--font-name" . ,(format #f "~s" %font-name))
-                 ("--popover-padding" . ,(format #f "~apt" (* %padding 1.6)))
-                 ("--popover-radius" . ,(format #f "~apx" (* %radius 2)))
-                 ("--ui-padding" . ,(format #f "~apt" %padding))
-                 ("--ui-spacing" . ,(format #f "~apt" %spacing))
-                 ("--ui-radius" . ,(format #f "~apx" %radius))
-                 ("--ui-border-width" . ,(format #f "~apx" %border-width))
-                 ("--ui-font-size" . ,(format #f "~apt" %font-size))
-                 ("--ui-icon-size" . ,(format #f "~apx" %icon-size))
+                 ("--popover-padding" . ,(format #f "~apt" (* (scaled %base-padding) 1.6)))
+                 ("--popover-radius" . ,(format #f "~apx" (* (scaled %base-radius) 2)))
+                 ("--ui-padding" . ,(format #f "~apt" (scaled %base-padding)))
+                 ("--ui-spacing" . ,(format #f "~apt" (scaled %base-spacing)))
+                 ("--ui-radius" . ,(format #f "~apx" (scaled %base-radius)))
+                 ("--ui-border-width" . ,(format #f "~apx" (scaled %base-border-width)))
+                 ("--ui-font-size" . ,(format #f "~apt" (scaled %base-font-size)))
+                 ("--ui-icon-size" . ,(format #f "~apx" (scaled %base-icon-size)))
                  ("--shadow-color" . ,(shadow-color))
                  ("--active-gradient" . ,(active-gradient))
                  ("--widget-bg" . ,(widget-bg))
