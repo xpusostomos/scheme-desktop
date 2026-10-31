@@ -26,6 +26,11 @@
   #:use-module ((scheme-desktop widgets menu)
                 #:select (menu-activate toggle-menu menu-move! menu-descend!
                           menu-ascend! menu-path menu-selected))
+  ;; The power menu's "are you sure?", for the same reason as the menu's names
+  ;; above: a keybinding reaches the shell through THIS module, so what it needs
+  ;; is re-exported here rather than left where it lives.
+  #:use-module ((scheme-desktop widgets power-menu verification)
+                #:select (request-power-action!))
   ;; For `reload!'.  Nothing happens when this module is imported -- the rebuild
   ;; lives there precisely so that importing it does not start a shell.
   #:use-module (scheme-desktop reload)
@@ -41,6 +46,7 @@
             media-play-pause! media-next! media-previous!
             screenshot screenshot-area
             launcher-search launcher-run-first!
+            confirm-power-action
             notification-status
             describe-state
             reload!))
@@ -139,6 +145,18 @@ anything, so it must not be an error."
    (output (exec-async (list "sh" "-c"
                              (format #f "grim -o ~a - | wl-copy" output))))
    (else (exec-async '("sh" "-c" "grim - | wl-copy")))))
+
+(define (confirm-power-action action)
+  "Ask to confirm a session action: 'shutdown, 'reboot, 'logout or 'sleep.
+
+THE PROCEDURE A KEYBINDING CALLS -- `(confirm-power-action 'shutdown)' -- and it
+only ASKS: the command runs when the user confirms in the window this opens.  See
+(scheme-desktop widgets power-menu verification).
+
+AN ACTION OUTSIDE THE FOUR IS IGNORED, so a keybinding with a typo in it does
+nothing rather than something: the four are the whole of what the modal can run.
+Porting note: ags2-shell's `requestHandler' has the same verb, and this is it."
+  (request-power-action! action))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Launcher

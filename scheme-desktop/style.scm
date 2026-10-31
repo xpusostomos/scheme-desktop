@@ -1732,10 +1732,77 @@ window#network .network-password-submit {
 }
 ")
 
+(define %powermenu-css
+  "
+/* ---- the power menu ---------------------------------------------------- */
+
+/* The card, as the date menu's and the menu's are cards: a popup window is the
+   size of the screen, so the CARD is what gets painted.  The class carries the
+   layout (`powermenu horizontal line' or `... box'), which is ags2-shell's
+   arrangement -- it styles the buttons by position and the class tells the two
+   layouts apart. */
+window#powermenu box.powermenu {
+  box-shadow:
+    0 0 5px 0 var(--shadow-color),
+    var(--neu-widget-highlight),
+    var(--neu-widget-shadow);
+  margin: max(var(--spacing), 8px);
+  border: var(--border-width) solid var(--popover-border-color);
+  background-color: var(--bg);
+  color: var(--fg);
+  border-radius: var(--popover-radius);
+  padding: var(--popover-padding);
+}
+
+window#powermenu box.powermenu button {
+  padding: calc(var(--spacing) * 0.5);
+  border-radius: var(--border-width);
+}
+
+window#powermenu box.powermenu button:hover {
+  background-color: var(--hover-bg);
+}
+
+/* ---- the confirmation modal -------------------------------------------- */
+
+/* Centred and its own card, because it is a modal rather than a panel: there is
+   no bar button behind it for it to line up with. */
+window#verification box.verification {
+  box-shadow:
+    0 0 5px 0 var(--shadow-color),
+    var(--neu-widget-highlight),
+    var(--neu-widget-shadow);
+  margin: max(var(--spacing), 8px);
+  border: var(--border-width) solid var(--popover-border-color);
+  background-color: var(--bg);
+  color: var(--fg);
+  border-radius: var(--popover-radius);
+  padding: var(--popover-padding);
+  min-width: calc(var(--spacing) * 14);
+}
+
+window#verification box.verification box.text-box {
+  border-spacing: calc(var(--spacing) * 0.5);
+}
+
+window#verification box.verification box.text-box label.title {
+  font-size: calc(var(--font-size) * 1.2);
+  font-weight: bold;
+}
+
+window#verification box.verification box.text-box label.desc {
+  opacity: 0.8;
+}
+
+window#verification box.verification box.buttons {
+  border-spacing: var(--spacing);
+}
+")
+
 (define (shell-css)
   "The whole stylesheet: theme variables, ags2-shell's base, then the bar."
   (string-append (theme-css) %base-css %bar-css %datemenu-css %menu-css
-                 %overview-css %network-css))
+                 %overview-css %network-css %powermenu-css))
 
 ;; One provider for the whole shell, parsed once and reused by every toplevel.
 ;; The toolkit holds it, so it cannot be collected out from under the windows.

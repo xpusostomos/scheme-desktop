@@ -45,6 +45,13 @@
   #:use-module (scheme-desktop widgets bar tray)
   #:use-module (scheme-desktop widgets bar)
   #:use-module (scheme-desktop widgets date-menu)
+  ;; PORTED FROM ags2-shell `widget/PowerMenu/': the bar button, the menu, and
+  ;; the "are you sure?" between them.  Three modules because the three are
+  ;; separately useful -- a keybinding wants the menu without the button, and the
+  ;; modal is what the menu's buttons open.
+  #:use-module (scheme-desktop widgets power-menu button)
+  #:use-module (scheme-desktop widgets power-menu window)
+  #:use-module (scheme-desktop widgets power-menu verification)
   #:use-module (scheme-desktop widgets menu)
   #:use-module (scheme-desktop widgets network)
   #:use-module (scheme-desktop widgets overview)
@@ -102,7 +109,15 @@
     battery
     battery-panel
     ;; the tray
-    tray))
+    tray
+    ;; the power menu -- the bar button, the menu it opens, and the modal that
+    ;; asks before anything happens.  PORTED FROM ags2-shell `widget/PowerMenu/'.
+    ;; The three are separately live on purpose: a keybinding wants the menu
+    ;; without a bar item, and `(confirm-power-action 'shutdown)' wants the modal
+    ;; without either.
+    powermenu
+    powermenu-panel
+    powermenu-verification))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The root
