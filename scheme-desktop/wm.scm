@@ -66,7 +66,7 @@
             wm-focused-monitor
             wm-on-change
             wm-focus-workspace! wm-focus-client! wm-focus-monitor!
-            wm-close-client!
+            wm-close-client! wm-focused-client wm-fullscreen-client!
 
             ;; the questions a widget asks
             wm-monitor-by-name wm-workspace-by-id wm-clients-on
@@ -132,6 +132,18 @@
 (define-generic wm-focus-monitor!)
 (define-generic wm-close-client!)
 
+;; WHICH WINDOW HAS THE FOCUS, as its address, or #f.  The dock asks: its dots
+;; light up for the application whose window is focused, which is ags2-shell's
+;; `focused_window_client'.  An ADDRESS rather than a client record, because the
+;; record is rebuilt on every read and comparing two of them by identity would
+;; always say no.
+(define-generic wm-focused-client)
+;; FOCUS A WINDOW AND TOGGLE ITS FULLSCREEN, in one go -- the dock's right-click,
+;; ags2-shell's `focus_client_and_toggle_fullscreen'.  One operation rather than
+;; two calls, for the reason `wm-focus-client!' batches: issued separately, the
+;; fullscreen can land on whatever had the focus before.
+(define-generic wm-fullscreen-client!)
+
 ;; A DEFAULT METHOD FOR EACH, so an unimplemented operation says which one and
 ;; on which compositor rather than "no applicable method for #<generic ...>".
 (define-syntax-rule (unimplemented (name arg ...) what)
@@ -149,6 +161,8 @@
 (unimplemented (wm-focus-client! client) "focusing a window")
 (unimplemented (wm-focus-monitor! name) "focusing a monitor")
 (unimplemented (wm-close-client! client) "closing a window")
+(unimplemented (wm-focused-client) "which window has the focus")
+(unimplemented (wm-fullscreen-client! client) "making a window fullscreen")
 
 ;;; ---------------------------------------------------------------------------
 ;;; The questions a widget asks, written once for every compositor

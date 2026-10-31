@@ -1799,10 +1799,194 @@ window#verification box.verification box.buttons {
 }
 ")
 
+;; PORTED FROM ags2-shell `widget/Dock/style.scss', its SCSS nesting written out
+;; flat.  The window is TRANSPARENT and the container is the card -- the dock
+;; window spans the monitor's width, so painting it would paint a stripe.
+(define %dock-css
+  "
+/* ---- the dock ----------------------------------------------------------- */
+
+window#dock-bottom {
+  background-color: transparent;
+  box-shadow: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+window#dock-bottom .dock-container {
+  margin: 0;
+  background-color: var(--bg);
+  border-radius: calc(var(--radius) * 2.3);
+  border: var(--border-width) solid var(--surface-edge-color);
+  box-shadow:
+    0 0 5px 0 var(--shadow-color),
+    var(--neu-widget-highlight),
+    var(--neu-widget-shadow);
+  transition: var(--transition);
+  padding: calc(var(--padding) * 0.375);
+}
+
+window#dock-bottom .dock-container .dock-icon {
+  margin: 0 calc(var(--padding) * 0.375);
+}
+
+window#dock-bottom .dock-container .dock-icon .app-button {
+  padding: calc(var(--padding) * 0.375);
+  border-radius: calc(var(--radius) * 0.8);
+  background: none;
+  border: none;
+  box-shadow: none;
+  transition: all 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* The lift on hover and the press, ags2-shell's numbers. */
+window#dock-bottom .dock-container .dock-icon .app-button:hover {
+  transform: translateY(-2px);
+}
+
+window#dock-bottom .dock-container .dock-icon .app-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
+window#dock-bottom .dock-container .dock-icon .app-button image {
+  border-radius: calc(var(--radius) * 0.6);
+}
+
+/* A dot per window.  Dim, and the primary colour when one of the group's windows
+   has the focus -- ags2-shell's `.window-dot' and `.window-dot.focused'. */
+window#dock-bottom .dock-container .window-dots .window-dot {
+  min-width: 5px;
+  min-height: 5px;
+  border-radius: 50%;
+  background: var(--fg);
+  opacity: 0.45;
+  margin: 2px 2px 0;
+}
+
+window#dock-bottom .dock-container .window-dots .window-dot.focused {
+  background: var(--primary-bg);
+  opacity: 1;
+}
+")
+
+;; THE VPN PANEL, in the network panel's vocabulary -- a card, a hero line, rows
+;; that fill on hover and mark their state with the accent -- because the two
+;; sit side by side in the bar and should look like siblings.
+(define %vpn-css
+  "
+/* ---- the VPN item and panel ------------------------------------------- */
+
+/* Lit while a VPN is up: the padlock takes the accent, as the plugin's does. */
+button.active-vpn .vpn-icon {
+  color: var(--primary-bg);
+}
+
+.vpn-item .vpn-name {
+  margin-left: 0.4em;
+}
+
+window#vpn .vpn-panel {
+  background-color: var(--bg);
+  border: var(--border-width) solid var(--popover-border-color);
+  border-radius: var(--popover-radius);
+  padding: var(--popover-padding);
+  min-width: 360px;
+  margin: max(var(--spacing), 8px);
+}
+
+window#vpn .vpn-hero {
+  margin-bottom: calc(var(--spacing) * 2);
+}
+
+window#vpn .vpn-hero-icon {
+  font-size: 2em;
+  min-width: 1.6em;
+  color: var(--fg);
+  margin-right: 0.5em;
+}
+
+window#vpn .vpn-hero-title {
+  font-size: 1.167em;
+  font-weight: bold;
+  color: var(--fg);
+}
+
+window#vpn .vpn-hero-meta {
+  font-size: 0.833em;
+  font-weight: bold;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+}
+
+window#vpn button.vpn-refresh {
+  all: unset;
+  padding: calc(var(--spacing) * 0.6);
+  border-radius: var(--radius);
+}
+
+window#vpn button.vpn-refresh:hover {
+  background-color: var(--hover-bg);
+}
+
+window#vpn .vpn-error {
+  color: var(--error-bg);
+  font-size: 0.833em;
+  margin-bottom: var(--spacing);
+}
+
+window#vpn button.vpn-row {
+  all: unset;
+  transition: var(--transition);
+  border-radius: var(--radius);
+  color: var(--fg);
+}
+
+window#vpn button.vpn-row:hover {
+  background-color: var(--hover-bg);
+}
+
+window#vpn .vpn-row-body {
+  padding: calc(var(--spacing) * 1.2) var(--padding);
+}
+
+window#vpn .vpn-row-icon {
+  font-size: 1.167em;
+  min-width: 1.6em;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+}
+
+window#vpn button.vpn-row.connected .vpn-row-icon,
+window#vpn button.vpn-row.connected .vpn-row-action {
+  color: var(--primary-bg);
+}
+
+window#vpn .vpn-row-status {
+  font-size: 0.833em;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+}
+
+window#vpn .vpn-row-action {
+  font-size: 1.083em;
+  min-width: 1.5em;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+}
+
+window#vpn .vpn-empty {
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+}
+
+window#vpn .vpn-hint {
+  font-size: 0.833em;
+  opacity: 0.7;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+  margin-top: var(--spacing);
+}
+")
+
 (define (shell-css)
   "The whole stylesheet: theme variables, ags2-shell's base, then the bar."
   (string-append (theme-css) %base-css %bar-css %datemenu-css %menu-css
-                 %overview-css %network-css %powermenu-css))
+                 %overview-css %network-css %powermenu-css %dock-css %vpn-css))
 
 ;; One provider for the whole shell, parsed once and reused by every toplevel.
 ;; The toolkit holds it, so it cannot be collected out from under the windows.

@@ -129,6 +129,24 @@
 (define-method (wm-close-client! (self <wm-hyprland>) client)
   (close-window! (wm-client-address client)))
 
+(define-method (wm-focused-client (self <wm-hyprland>))
+  ;; AstalHyprland's `focused-client', as its address -- the same form
+  ;; `wm-clients' gives every client, so the two compare with `equal?'.
+  (let* ((h (hyprland))
+         (c (and h (prop h "focused-client"))))
+    (and c (prop c "address"))))
+
+(define-method (wm-fullscreen-client! (self <wm-hyprland>) client)
+  ;; ags2-shell's `focus_client_and_toggle_fullscreen': focus, then the
+  ;; dispatcher it uses, `hl.dsp.window.fullscreen({ window = ... })'.  In ONE
+  ;; batch -- the focus `wm-focus-client!' would issue, plus the fullscreen --
+  ;; so nothing can take the focus in between.
+  (let ((selector (window-selector! (wm-client-address client))))
+    (and selector
+         (hyprctl-batch!
+          (list (format #f "hl.dsp.focus({ window = ~s })" selector)
+                (format #f "hl.dsp.window.fullscreen({ window = ~s })" selector))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Installing
 ;;; ---------------------------------------------------------------------------

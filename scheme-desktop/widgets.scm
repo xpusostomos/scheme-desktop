@@ -52,6 +52,10 @@
   #:use-module (scheme-desktop widgets power-menu button)
   #:use-module (scheme-desktop widgets power-menu window)
   #:use-module (scheme-desktop widgets power-menu verification)
+  ;; PORTED FROM ags2-shell `widget/Dock/': an icon per running app, per monitor.
+  #:use-module (scheme-desktop widgets dock)
+  ;; PORTED FROM the Omarchy VPN plugin (~/GIT/omarchy-vpn): NetworkManager VPNs.
+  #:use-module (scheme-desktop widgets vpn)
   #:use-module (scheme-desktop widgets menu)
   #:use-module (scheme-desktop widgets network)
   #:use-module (scheme-desktop widgets overview)
@@ -117,7 +121,14 @@
     ;; without either.
     powermenu
     powermenu-panel
-    powermenu-verification))
+    powermenu-verification
+    ;; the dock along the bottom edge: the running apps, grouped, one per monitor.
+    ;; PORTED FROM ags2-shell `widget/Dock/'.
+    dock
+    ;; VPNs: the padlock in the bar and its panel.  PORTED FROM the Omarchy VPN
+    ;; plugin (~/GIT/omarchy-vpn).
+    vpn
+    vpn-panel))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The root
