@@ -1868,6 +1868,17 @@ window#dock-bottom .dock-container .window-dots .window-dot.focused {
   background: var(--primary-bg);
   opacity: 1;
 }
+
+/* The line between the running apps and the trash: ags2-shell's `.dock-separator',
+   its custom properties written out (`--dock-space' is the spacing, the gap one
+   and a half of it, the height four). */
+window#dock-bottom .dock-container .dock-separator {
+  min-width: 1px;
+  min-height: calc(var(--spacing) * 4);
+  margin: calc(var(--spacing) * 1.25) calc(var(--spacing) * 1.5);
+  border-radius: 1px;
+  background-color: color-mix(in srgb, var(--fg) 20%, transparent);
+}
 ")
 
 ;; THE VPN PANEL, in the network panel's vocabulary -- a card, a hero line, rows

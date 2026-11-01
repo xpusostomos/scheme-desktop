@@ -33,6 +33,8 @@
   #:use-module (scheme-toolkit services apps)
   #:use-module (scheme-desktop wm)
   #:use-module (scheme-desktop widgets theme)
+  ;; The trash at the end of the dock: whether it is full, and opening it.
+  #:use-module (scheme-desktop widgets dock trash)
   #:use-module (oop goops)
   #:use-module (srfi srfi-1)
   ;; `string-null?'.  Not core Guile's -- the same trap as `let-values' in the
@@ -41,7 +43,7 @@
   #:use-module (ice-9 format)
   #:export (<dock-desktop-widget> build-dock!))
 
-(define-gi-imports "Gtk" "Box" "Button" "Image" "GestureClick")
+(define-gi-imports "Gtk" "Box" "Button" "Image" "GestureClick" "Separator")
 
 ;;; ---------------------------------------------------------------------------
 ;;; The widget
@@ -55,6 +57,15 @@
          #:accessor dock-requested-scale
          #:config '(number 0.3 3.0)
          #:label "Dock size")
+  ;; THE TRASH AT THE END OF THE DOCK, after a separator -- ags2-shell's
+  ;; `options.dock.trash', on by default as it is there.  Turned off, the icon
+  ;; goes and so does the watch on the trash: nothing looks at the trash that
+  ;; nothing shows.
+  (trash-enabled #:init-value #t #:init-keyword #:trash-enabled
+                 #:accessor dock-trash-enabled
+                 #:config '(boolean)
+                 #:label "Show the trash in the dock"
+                 #:apply (lambda (w on) (dock-trash-changed! w)))
   ;; ONE WINDOW PER MONITOR, keyed by its output, and the box in each that the
   ;; icons go in.  The same arrangement as the bar's, for the same reason: these
   ;; lists are the only record of the windows, so `widget-windows' answers from
@@ -74,6 +85,31 @@
     (length wins)))
 
 (define (dock) (desktop-widget-required <dock-desktop-widget>))
+
+;;; ---------------------------------------------------------------------------
+;;; The trash's watch, following the option
+;;; ---------------------------------------------------------------------------
+
+;; THE RELEASE PROCEDURE, while this shell's docks watch the trash, or #f.  ONE
+;; for the dock widget rather than one per monitor: every monitor's dock shows
+;; the same trash.
+(define %release-trash #f)
+
+(define (sync-trash-watcher! w)
+  "Watch the trash when the option says to show it, and not otherwise."
+  (cond ((and (dock-trash-enabled w) (not %release-trash))
+         (set! %release-trash (acquire-trash-watcher!)))
+        ((and (not (dock-trash-enabled w)) %release-trash)
+         (%release-trash)
+         (set! %release-trash #f))))
+
+(define (dock-trash-changed! w)
+  "The trash option changed: start or stop the watch, and redraw every dock."
+  (sync-trash-watcher! w)
+  (for-each (lambda (entry)
+              (when (> (length entry) 3)
+                (catch #t (list-ref entry 3) (lambda a #f))))
+            (dock-windows w)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The items: running windows, grouped by application
@@ -220,31 +256,57 @@ ags2-shell's `focus_next': clicking an app's icon again walks its windows."
 ;;; One monitor's dock
 ;;; ---------------------------------------------------------------------------
 
-(define (render-dock! win box monitor items)
-  "Put ITEMS in BOX, size it for MONITOR, and show WIN only when there are any.
+(define (trash-tree icon-size)
+  "The trash: full or empty, opening it on a click.  ags2-shell's `TrashIcon'."
+  (let ((full (trash-has-items)))
+    (element <gtk-box> #:class "dock-icon dock-horizontal"
+             #:orientation 'vertical #:halign 'center
+      (element <gtk-button> #:class "app-button" #:tooltip-text "Trash"
+               #:can-focus #f
+               #:on-clicked (lambda (b) (open-trash!))
+        (element <gtk-image> #:icon-name (trash-icon-name full)
+                 #:use-fallback #t #:pixel-size icon-size
+                 #:halign 'center #:valign 'center)))))
+
+(define (render-dock! win box monitor items trash?)
+  "Put ITEMS -- and the trash, when TRASH? -- in BOX, size it for MONITOR, and
+show WIN only when there is something in it.
 
 HIDDEN WHEN EMPTY, as ags2-shell's is (`dock_items().length > 0'): an empty dock
-is a bar of nothing with an exclusive zone, taking screen for no reason."
+is a bar of nothing with an exclusive zone, taking screen for no reason.  The
+trash COUNTS as an item there, so a dock with the trash on is never empty.
+
+THE SEPARATOR IS ONLY BETWEEN THINGS: with no apps running there is nothing for
+it to separate the trash from, and ags2-shell leaves it out then too."
   (let* ((width (list-ref (monitor-geometry monitor) 2))
-         (scale (dock-scale (length items) width))
+         (count (+ (length items) (if trash? 1 0)))
+         (scale (dock-scale count width))
          (pixel-scale (* scale (ui-scale)))
          (icon-size (max 16 (px (* 64 pixel-scale))))
          (thickness (max 48 (px (* 94 scale (ui-scale))))))
     (clear-box! box)
     (for-each (lambda (item) (add-child! box (group-icon-tree item icon-size) #f)) items)
+    (when trash?
+      (when (pair? items)
+        (add-child! box (element <gtk-separator> #:class "dock-separator"
+                                 #:orientation 'vertical #:valign 'center
+                                 #:height-request icon-size)
+                    #f))
+      (add-child! box (trash-tree icon-size) #f))
     (catch #t (lambda () (slot-set! box 'margin-bottom (px (* 16 pixel-scale))))
            (lambda a #f))
     (catch #t (lambda () (slot-set! win 'height-request thickness)) (lambda a #f))
-    (catch #t (lambda () (slot-set! win 'visible (pair? items))) (lambda a #f))))
+    (catch #t (lambda () (slot-set! win 'visible (> count 0))) (lambda a #f))))
 
-(define (items-signature items focused)
-  "What decides whether the dock must be redrawn.
+(define (items-signature items focused trash)
+  "What decides whether the dock must be redrawn -- TRASH is #f when it is off,
+and 'full or 'empty when it is on.
 
 ags2-shell keeps the previous items and reuses any that did not change, for the
 same reason: the compositor reports EVERY change -- a title, a move, a focus
 anywhere -- and rebuilding the icons on each is a dock that flickers while you
 type.  So the dock is redrawn only when this changes."
-  (cons focused
+  (cons* focused trash
         (map (lambda (item)
                (cons* (list-ref item 0) (list-ref item 1)
                       (map wm-client-address (drop item 2))))
@@ -272,17 +334,25 @@ root `for-each-monitor' makes, so the monitor leaving disposes it."
     (define (refresh!)
       (let* ((items (dock-items))
              (focused (catch #t (lambda () (wm-focused-client (wm))) (lambda a #f)))
-             (signature (items-signature items focused)))
+             (trash? (dock-trash-enabled model))
+             (signature (items-signature items focused
+                                         (and trash? (if (trash-has-items) 'full 'empty)))))
         (unless (equal? signature last)
           (set! last signature)
           (catch #t
-            (lambda () (render-dock! win box monitor items))
+            (lambda () (render-dock! win box monitor items trash?))
             (lambda (key . rest)
               (format (current-error-port) "scheme-desktop: dock: ~a ~s~%" key rest))))))
-    (dock-windows-set! model (cons (list output win box)
+    ;; REFRESH! IS KEPT WITH THE WINDOW, so the trash option and the trash's own
+    ;; state can redraw every monitor's dock without rebuilding any of them.
+    (dock-windows-set! model (cons (list output win box refresh!)
                                    (remove (lambda (e) (equal? (car e) output))
                                            (dock-windows model))))
+    (sync-trash-watcher! model)
     (refresh!)
+    ;; THE TRASH FILLING OR EMPTYING REDRAWS THE DOCK.  An effect on its
+    ;; accessor, in this monitor's root, so it ends with the dock.
+    (create-effect (lambda () (trash-has-items) (refresh!)))
     ;; THE COMPOSITOR SAYS WHEN ANYTHING CHANGED, and the signature above decides
     ;; whether it changed for the dock.  The disconnect is registered with the
     ;; monitor's root, so an unplugged monitor stops being redrawn.
