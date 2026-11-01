@@ -136,6 +136,34 @@
          (c (and h (prop h "focused-client"))))
     (and c (prop c "address"))))
 
+(define-method (wm-monitor-fullscreen? (self <wm-hyprland>) name)
+  ;; ags2-shell's `track_monitor_fullscreen', as one question.  The monitor's
+  ;; workspace is its SPECIAL one when that is showing (an id other than 0), its
+  ;; active one otherwise; and the answer is whether a mapped, unhidden client on
+  ;; that workspace, on that monitor, is fullscreen -- for itself or for its
+  ;; client (`fullscreen' or `fullscreen-client').
+  ;;
+  ;; THE FULLSCREEN STATE IS A LIST under G-Golf -- `(none)', `(fullscreen)' --
+  ;; because AstalHyprland declares it a flags type, so it is tested with `memq'.
+  (let ((m (find (lambda (m) (equal? (prop m "name") name)) (hyprland-monitors))))
+    (and m
+         (let* ((special (let ((sw (prop m "special-workspace")))
+                           (and sw (prop sw "id"))))
+                (workspace (if (and (number? special) (not (zero? special)))
+                               special
+                               (let ((aw (prop m "active-workspace")))
+                                 (and aw (prop aw "id")))))
+                (fullscreen? (lambda (v) (and (list? v) (memq 'fullscreen v) #t))))
+           (and (number? workspace)
+                (any (lambda (c)
+                       (and (prop c "mapped")
+                            (not (prop c "hidden"))
+                            (equal? (monitor-of c) name)
+                            (let ((w (prop c "workspace"))) (and w (equal? (prop w "id") workspace)))
+                            (or (fullscreen? (prop c "fullscreen"))
+                                (fullscreen? (prop c "fullscreen-client")))))
+                     (hyprland-client-list)))))))
+
 (define-method (wm-fullscreen-client! (self <wm-hyprland>) client)
   ;; ags2-shell's `focus_client_and_toggle_fullscreen': focus, then the
   ;; dispatcher it uses, `hl.dsp.window.fullscreen({ window = ... })'.  In ONE

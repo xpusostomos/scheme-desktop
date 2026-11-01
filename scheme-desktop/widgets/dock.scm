@@ -45,7 +45,8 @@
   #:use-module (ice-9 format)
   #:export (<dock-desktop-widget> build-dock!))
 
-(define-gi-imports "Gtk" "Box" "Button" "Image" "GestureClick" "Separator")
+(define-gi-imports "Gtk" "Box" "Button" "Image" "GestureClick" "Separator"
+  "EventControllerMotion")
 
 ;;; ---------------------------------------------------------------------------
 ;;; The widget
@@ -77,6 +78,15 @@
              #:config '(list)
              #:label "Pinned applications"
              #:apply (lambda (w names) (dock-options-changed! w)))
+  ;; STATIC OR AUTOHIDE -- ags2-shell's `options.dock.mode', static by default.
+  ;; Static takes its strip of the screen, as the bar does.  Autohide takes none:
+  ;; the dock appears when the pointer reaches a thin strip along the bottom edge,
+  ;; and goes again a quarter second after the pointer has left both.
+  (mode #:init-value 'static #:init-keyword #:mode
+        #:accessor dock-mode
+        #:config '(choice static autohide)
+        #:label "Dock behaviour"
+        #:apply (lambda (w mode) (dock-options-changed! w)))
   (trash-enabled #:init-value #t #:init-keyword #:trash-enabled
                  #:accessor dock-trash-enabled
                  #:config '(boolean)
@@ -94,8 +104,14 @@
 ;; FORGOTTEN WHEN DESTROYED, for the bar's reason: a list of destroyed windows
 ;; is a list of dead GObjects, and the first thing to walk it after a rebuild
 ;; touches one.
+;;
+;; AND THE HOT ZONES WITH THEM.  They are not in `widget-windows' -- showing the
+;; dock must not show the strip, which follows its own rule -- so they are
+;; destroyed here by name, from the entry that keeps them.
 (define-method (widget-destroy-windows! (w <dock-desktop-widget>))
-  (let ((wins (widget-windows w)))
+  (let ((wins (append (widget-windows w)
+                      (filter-map (lambda (e) (and (> (length e) 4) (list-ref e 4)))
+                                  (dock-windows w)))))
     (for-each (lambda (win) (catch #t (lambda () (destroy win)) (lambda args #f))) wins)
     (dock-windows-set! w '())
     (length wins)))
@@ -342,9 +358,8 @@ second -- the bounce that says the click was heard, before the window exists."
   "Put ITEMS -- and the trash, when TRASH? -- in BOX, size it for MONITOR, and
 show WIN only when there is something in it.
 
-HIDDEN WHEN EMPTY, as ags2-shell's is (`dock_items().length > 0'): an empty dock
-is a bar of nothing with an exclusive zone, taking screen for no reason.  The
-trash COUNTS as an item there, so a dock with the trash on is never empty.
+Answers (COUNT PIXEL-SCALE): how many things it drew -- the trash counts, so a
+dock with the trash on is never empty -- and the scale it drew them at.
 
 THE SEPARATOR IS ONLY BETWEEN THINGS: with no apps running there is nothing for
 it to separate the trash from, and ags2-shell leaves it out then too."
@@ -371,7 +386,10 @@ it to separate the trash from, and ags2-shell leaves it out then too."
     (catch #t (lambda () (slot-set! box 'margin-bottom (px (* 16 pixel-scale))))
            (lambda a #f))
     (catch #t (lambda () (slot-set! win 'height-request thickness)) (lambda a #f))
-    (catch #t (lambda () (slot-set! win 'visible (> count 0))) (lambda a #f))))
+    ;; WHETHER IT IS SHOWN IS NOT DECIDED HERE: that depends on the mode, the
+    ;; pointer and fullscreen windows as well -- see `build-dock!'.  What this
+    ;; answers is what that needs: whether there is anything, and how big.
+    (list count pixel-scale)))
 
 (define (items-signature items focused trash)
   "What decides whether the dock must be redrawn -- TRASH is #f when it is off,
@@ -391,15 +409,21 @@ type.  So the dock is redrawn only when this changes."
 
 (define* (build-dock! monitor #:key (name "dock-bottom"))
   "Build MONITOR's dock and keep it current.  Called once per monitor, inside the
-root `for-each-monitor' makes, so the monitor leaving disposes it."
+root `for-each-monitor' makes, so the monitor leaving disposes it.
+
+TWO WINDOWS: the dock, and -- in autohide mode -- the strip along the bottom edge
+that the pointer reaches to bring it up.  ags2-shell's `Hotzone' and
+`DockSurface'.
+
+WHEN IT IS SHOWN, ags2-shell's rule: there must be something in it, no window on
+this monitor may be fullscreen, and it is either static or being hovered.  The
+strip is shown exactly when an autohide dock could be."
   (let* ((model (dock))
          (output (monitor-name monitor))
          (box (element <gtk-box> #:class "dock-container dock-horizontal"
                        #:orientation 'horizontal #:halign 'center #:valign 'end))
          (win (layer-window name
                             #:anchor '(bottom left right)
-                            ;; STATIC MODE, ags2-shell's default: the dock takes
-                            ;; its strip of the screen, as the bar does.
                             #:exclusivity 'exclusive
                             #:layer 'top
                             #:keymode 'none
@@ -407,7 +431,42 @@ root `for-each-monitor' makes, so the monitor leaving disposes it."
                             #:class "dock"
                             #:visible #f
                             box))
-         (last #f))
+         ;; THE HOT ZONE: an invisible strip, which must still be HIT by the
+         ;; pointer -- a fully transparent surface is input-transparent on some
+         ;; compositors, which is why ags2-shell paints it 1% black and so does
+         ;; this.
+         (zone (layer-window (string-append name "-hotzone")
+                             #:anchor '(bottom left right)
+                             #:exclusivity 'ignore
+                             #:layer 'top
+                             #:keymode 'none
+                             #:gdkmonitor monitor
+                             #:class "dock-hotzone"
+                             #:visible #f
+                             (element <gtk-box> #:class "dock-hotzone"
+                                      #:hexpand #t #:vexpand #t)))
+         (last #f)
+         (drawn '(0 1.0))
+         (zones '())          ; the windows the pointer is in: 'dock, 'zone
+         (hovered #f)
+         (hiding #f))
+    (define (apply-visibility!)
+      ;; DECIDED ON EVERY REFRESH, not only when the icons change: a fullscreen
+      ;; window or the pointer leaving changes it with the icons the same.
+      (let* ((count (car drawn))
+             (pixel-scale (cadr drawn))
+             (autohide? (eq? (dock-mode model) 'autohide))
+             (fullscreen? (catch #t (lambda () (wm-monitor-fullscreen? (wm) output))
+                                 (lambda a #f)))
+             (active? (and (> count 0) (not fullscreen?))))
+        (catch #t
+          (lambda ()
+            (slot-set! win 'exclusivity (if (and active? (not autohide?)) 'exclusive 'ignore))
+            (slot-set! zone 'height-request (max 16 (px (* 22 pixel-scale))))
+            (slot-set! zone 'visible (and active? autohide?))
+            (slot-set! win 'visible (and active? (or (not autohide?) hovered))))
+          (lambda (key . rest)
+            (format (current-error-port) "scheme-desktop: dock: ~a ~s~%" key rest)))))
     (define (refresh!)
       (let* ((items (dock-items))
              (focused (catch #t (lambda () (wm-focused-client (wm))) (lambda a #f)))
@@ -417,12 +476,38 @@ root `for-each-monitor' makes, so the monitor leaving disposes it."
         (unless (equal? signature last)
           (set! last signature)
           (catch #t
-            (lambda () (render-dock! win box monitor items trash?))
+            (lambda () (set! drawn (render-dock! win box monitor items trash?)))
             (lambda (key . rest)
-              (format (current-error-port) "scheme-desktop: dock: ~a ~s~%" key rest))))))
-    ;; REFRESH! IS KEPT WITH THE WINDOW, so the trash option and the trash's own
-    ;; state can redraw every monitor's dock without rebuilding any of them.
-    (dock-windows-set! model (cons (list output win box refresh!)
+              (format (current-error-port) "scheme-desktop: dock: ~a ~s~%" key rest))))
+        (apply-visibility!)))
+    ;; THE HOVER, ags2-shell's: entering either window shows the dock and cancels
+    ;; a pending hide; leaving the last of them hides it 250ms later, so moving
+    ;; from the strip up into the dock does not close it on the way.
+    (define (enter! which)
+      (set! zones (lset-adjoin eq? zones which))
+      (set! hiding #f)
+      (unless hovered (set! hovered #t) (apply-visibility!)))
+    (define (leave! which)
+      (set! zones (delete which zones))
+      (when (null? zones)
+        (let ((token (list 'hide)))
+          (set! hiding token)
+          (timeout 250 (lambda ()
+                         (when (eq? hiding token)
+                           (set! hiding #f)
+                           (set! hovered #f)
+                           (apply-visibility!)))))))
+    (define (watch-hover! window which)
+      (let ((motion (make <gtk-event-controller-motion>)))
+        (connect-signal! motion "enter" (lambda (m x y) (enter! which)))
+        (connect-signal! motion "leave" (lambda (m) (leave! which)))
+        (add-controller window motion)))
+    (watch-hover! win 'dock)
+    (watch-hover! zone 'zone)
+    ;; REFRESH! IS KEPT WITH THE WINDOW, so the options and the trash's own state
+    ;; can redraw every monitor's dock without rebuilding any of them.  The hot
+    ;; zone is kept too, so it is destroyed with the dock.
+    (dock-windows-set! model (cons (list output win box refresh! zone)
                                    (remove (lambda (e) (equal? (car e) output))
                                            (dock-windows model))))
     (sync-trash-watcher! model)
@@ -430,12 +515,14 @@ root `for-each-monitor' makes, so the monitor leaving disposes it."
     ;; THE TRASH FILLING OR EMPTYING REDRAWS THE DOCK.  An effect on its
     ;; accessor, in this monitor's root, so it ends with the dock.
     (create-effect (lambda () (trash-has-items) (refresh!)))
-    ;; THE COMPOSITOR SAYS WHEN ANYTHING CHANGED, and the signature above decides
-    ;; whether it changed for the dock.  The disconnect is registered with the
-    ;; monitor's root, so an unplugged monitor stops being redrawn.
+    ;; THE COMPOSITOR SAYS WHEN ANYTHING CHANGED -- a window, the focus, a
+    ;; fullscreen -- and `refresh!' decides what that means for the dock.  The
+    ;; disconnect is registered with the monitor's root, so an unplugged monitor
+    ;; stops being redrawn.
     (let ((stop (wm-on-change (wm) refresh!)))
       (on-cleanup (lambda ()
                     (catch #t stop (lambda a #f))
+                    (catch #t (lambda () (destroy zone)) (lambda a #f))
                     (catch #t (lambda () (destroy win)) (lambda a #f))
                     (dock-windows-set! model (remove (lambda (e) (equal? (car e) output))
                                                      (dock-windows model))))))

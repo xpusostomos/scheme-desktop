@@ -1869,6 +1869,17 @@ window#dock-bottom .dock-container .window-dots .window-dot.focused {
   opacity: 1;
 }
 
+/* THE AUTOHIDE HOT ZONE: invisible, but not quite transparent.  ags2-shell paints
+   it 1% black, because a surface with nothing at all on it may be taken as
+   input-transparent, and then the pointer passes straight through the strip that
+   is there to catch it. */
+window#dock-bottom-hotzone,
+window#dock-bottom-hotzone .dock-hotzone {
+  background: rgba(0, 0, 0, 0.01);
+  box-shadow: none;
+  border: none;
+}
+
 /* The line between the running apps and the trash: ags2-shell's `.dock-separator',
    its custom properties written out (`--dock-space' is the spacing, the gap one
    and a half of it, the height four). */

@@ -67,6 +67,7 @@
             wm-on-change
             wm-focus-workspace! wm-focus-client! wm-focus-monitor!
             wm-close-client! wm-focused-client wm-fullscreen-client!
+            wm-monitor-fullscreen?
 
             ;; the questions a widget asks
             wm-monitor-by-name wm-workspace-by-id wm-clients-on
@@ -143,6 +144,11 @@
 ;; two calls, for the reason `wm-focus-client!' batches: issued separately, the
 ;; fullscreen can land on whatever had the focus before.
 (define-generic wm-fullscreen-client!)
+;; WHETHER A MONITOR IS SHOWING A FULLSCREEN WINDOW, by its output name.  What a
+;; dock asks so that it can get out of the way of a video -- ags2-shell's
+;; `track_monitor_fullscreen'.  A question for the compositor: only it knows which
+;; workspace a monitor is showing and what on it is fullscreen.
+(define-generic wm-monitor-fullscreen?)
 
 ;; A DEFAULT METHOD FOR EACH, so an unimplemented operation says which one and
 ;; on which compositor rather than "no applicable method for #<generic ...>".
@@ -163,6 +169,7 @@
 (unimplemented (wm-close-client! client) "closing a window")
 (unimplemented (wm-focused-client) "which window has the focus")
 (unimplemented (wm-fullscreen-client! client) "making a window fullscreen")
+(unimplemented (wm-monitor-fullscreen? name) "whether a monitor shows a fullscreen window")
 
 ;;; ---------------------------------------------------------------------------
 ;;; The questions a widget asks, written once for every compositor
