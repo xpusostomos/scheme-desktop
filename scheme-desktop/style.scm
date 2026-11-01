@@ -1806,7 +1806,7 @@ window#verification box.verification box.buttons {
   "
 /* ---- the dock ----------------------------------------------------------- */
 
-window#dock-bottom {
+window.dock {
   background-color: transparent;
   box-shadow: none;
   border: none;
@@ -1814,7 +1814,7 @@ window#dock-bottom {
   margin: 0;
 }
 
-window#dock-bottom .dock-container {
+window.dock .dock-container {
   margin: 0;
   background-color: var(--bg);
   border-radius: calc(var(--radius) * 2.3);
@@ -1827,11 +1827,11 @@ window#dock-bottom .dock-container {
   padding: calc(var(--padding) * 0.375);
 }
 
-window#dock-bottom .dock-container .dock-icon {
+window.dock .dock-container .dock-icon {
   margin: 0 calc(var(--padding) * 0.375);
 }
 
-window#dock-bottom .dock-container .dock-icon .app-button {
+window.dock .dock-container .dock-icon .app-button {
   padding: calc(var(--padding) * 0.375);
   border-radius: calc(var(--radius) * 0.8);
   background: none;
@@ -1840,22 +1840,37 @@ window#dock-bottom .dock-container .dock-icon .app-button {
   transition: all 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-/* The lift on hover and the press, ags2-shell's numbers. */
-window#dock-bottom .dock-container .dock-icon .app-button:hover {
+/* The lift on hover and the press, ags2-shell's numbers -- UP, away from the
+   bottom edge, and RIGHT, away from the left one. */
+window.dock .dock-container .dock-icon.dock-horizontal .app-button:hover {
   transform: translateY(-2px);
 }
 
-window#dock-bottom .dock-container .dock-icon .app-button:active {
+window.dock .dock-container .dock-icon.dock-horizontal .app-button:active {
   transform: translateY(0) scale(0.98);
 }
 
-window#dock-bottom .dock-container .dock-icon .app-button image {
+window.dock .dock-container .dock-icon.dock-vertical .app-button:hover {
+  transform: translateX(2px);
+}
+
+window.dock .dock-container .dock-icon.dock-vertical .app-button:active {
+  transform: translateX(0) scale(0.98);
+}
+
+/* Down the side, the dots stand in a column beside the icon, so their margin
+   turns with them. */
+window.dock .dock-container .dock-icon.dock-vertical .window-dots .window-dot {
+  margin: 2px 0 2px 2px;
+}
+
+window.dock .dock-container .dock-icon .app-button image {
   border-radius: calc(var(--radius) * 0.6);
 }
 
 /* A dot per window.  Dim, and the primary colour when one of the group's windows
    has the focus -- ags2-shell's `.window-dot' and `.window-dot.focused'. */
-window#dock-bottom .dock-container .window-dots .window-dot {
+window.dock .dock-container .window-dots .window-dot {
   min-width: 5px;
   min-height: 5px;
   border-radius: 50%;
@@ -1864,7 +1879,7 @@ window#dock-bottom .dock-container .window-dots .window-dot {
   margin: 2px 2px 0;
 }
 
-window#dock-bottom .dock-container .window-dots .window-dot.focused {
+window.dock .dock-container .window-dots .window-dot.focused {
   background: var(--primary-bg);
   opacity: 1;
 }
@@ -1873,8 +1888,8 @@ window#dock-bottom .dock-container .window-dots .window-dot.focused {
    it 1% black, because a surface with nothing at all on it may be taken as
    input-transparent, and then the pointer passes straight through the strip that
    is there to catch it. */
-window#dock-bottom-hotzone,
-window#dock-bottom-hotzone .dock-hotzone {
+window.dock-hotzone,
+window.dock-hotzone .dock-hotzone {
   background: rgba(0, 0, 0, 0.01);
   box-shadow: none;
   border: none;
@@ -1883,7 +1898,7 @@ window#dock-bottom-hotzone .dock-hotzone {
 /* The line between the running apps and the trash: ags2-shell's `.dock-separator',
    its custom properties written out (`--dock-space' is the spacing, the gap one
    and a half of it, the height four). */
-window#dock-bottom .dock-container .dock-separator {
+window.dock .dock-container .dock-separator {
   min-width: 1px;
   min-height: calc(var(--spacing) * 4);
   margin: calc(var(--spacing) * 1.25) calc(var(--spacing) * 1.5);

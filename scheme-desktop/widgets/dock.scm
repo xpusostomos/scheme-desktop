@@ -82,6 +82,14 @@
   ;; Static takes its strip of the screen, as the bar does.  Autohide takes none:
   ;; the dock appears when the pointer reaches a thin strip along the bottom edge,
   ;; and goes again a quarter second after the pointer has left both.
+;; WHICH EDGE -- ags2-shell's `options.dock.position': `bottom-center', its
+  ;; default, or `center-left', a column down the left side.  Changed live: the
+  ;; windows are re-anchored and the icons redrawn, and nothing is rebuilt.
+  (position #:init-value 'bottom #:init-keyword #:position
+            #:accessor dock-position
+            #:config '(choice bottom left)
+            #:label "Dock edge"
+            #:apply (lambda (w side) (dock-options-changed! w)))
   (mode #:init-value 'static #:init-keyword #:mode
         #:accessor dock-mode
         #:config '(choice static autohide)
@@ -277,8 +285,22 @@ ags2-shell's `focus_next': clicking an app's icon again walks its windows."
          (next (if index (modulo (+ index 1) (length clients)) 0)))
     (wm-focus-client! (wm) (list-ref clients next))))
 
-(define (group-icon-tree item icon-size)
-  "One application: its button, and under it a dot per window (up to three)."
+;; ONE ICON'S BOX, BOTH WAYS ROUND -- ags2-shell's `DockIconBox'.  Along the
+;; bottom an icon is a column, its dots under it; down the left side it is a row,
+;; its dots beside it, on the side towards the edge.  Written once so the two
+;; layouts cannot drift.
+(define (side-class side) (if (eq? side 'left) "dock-vertical" "dock-horizontal"))
+
+(define (icon-box side . children)
+  (apply element <gtk-box>
+         #:class (string-append "dock-icon " (side-class side))
+         #:orientation (if (eq? side 'left) 'horizontal 'vertical)
+         #:halign 'center
+         children))
+
+(define (group-icon-tree item icon-size side)
+  "One application: its button, and a dot per window (up to three) -- under it
+along the bottom, beside it down the left."
   (let* ((class (list-ref item 0))
          (icon (list-ref item 1))
          (clients (drop item 2))
@@ -299,28 +321,30 @@ ags2-shell's `focus_next': clicking an app's icon again walks its windows."
     (on-button! button 3 (lambda () (wm-fullscreen-client! (wm) (car clients))))
     (on-button! button 2 (lambda ()
                            (for-each (lambda (c) (wm-close-client! (wm) c)) clients)))
-    (element <gtk-box> #:class "dock-icon dock-horizontal"
-             #:orientation 'vertical #:halign 'center
-      (this! button)
+    (let ((dots
       ;; THE DOTS ARE POSITIONAL CHILDREN, APPLIED.  This said `#:children (map
       ;; ...)' first, which `element' does not have -- a comment in
       ;; (scheme-toolkit widget) lists it, the code does not -- so the keyword was
       ;; taken for a GTK property, dropped without a word, and every dock icon had
       ;; an empty dot box under it.  Found by counting the box's children in the
       ;; running shell: 0.
-      (apply element <gtk-box> #:class "window-dots" #:orientation 'horizontal
+      (apply element <gtk-box> #:class "window-dots"
+             #:orientation (if (eq? side 'left) 'vertical 'horizontal)
              #:halign 'center #:valign 'center
              (map (lambda (i)
                     (element <gtk-box>
                              #:class (if is-focused "window-dot focused" "window-dot")
                              #:halign 'center #:valign 'center))
-                  (iota (min (length clients) 3)))))))
+                  (iota (min (length clients) 3))))))
+      (if (eq? side 'left)
+          (icon-box side dots (this! button))
+          (icon-box side (this! button) dots)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; One monitor's dock
 ;;; ---------------------------------------------------------------------------
 
-(define (favorite-tree item icon-size)
+(define (favorite-tree item icon-size side)
   "A pinned application with no windows: its icon, starting it on a click.
 
 ags2-shell's `FavoriteIcon', including its `launching' class for a quarter of a
@@ -338,15 +362,12 @@ second -- the bounce that says the click was heard, before the window exists."
                        (toggle-class! button "launching" #t)
                        (app-launch! app)
                        (timeout 250 (lambda () (toggle-class! button "launching" #f)))))
-    (element <gtk-box> #:class "dock-icon dock-horizontal"
-             #:orientation 'vertical #:halign 'center
-      (this! button))))
+    (icon-box side (this! button))))
 
-(define (trash-tree icon-size)
+(define (trash-tree icon-size side)
   "The trash: full or empty, opening it on a click.  ags2-shell's `TrashIcon'."
   (let ((full (trash-has-items)))
-    (element <gtk-box> #:class "dock-icon dock-horizontal"
-             #:orientation 'vertical #:halign 'center
+    (icon-box side
       (element <gtk-button> #:class "app-button" #:tooltip-text "Trash"
                #:can-focus #f
                #:on-clicked (lambda (b) (open-trash!))
@@ -354,7 +375,7 @@ second -- the bounce that says the click was heard, before the window exists."
                  #:use-fallback #t #:pixel-size icon-size
                  #:halign 'center #:valign 'center)))))
 
-(define (render-dock! win box monitor items trash?)
+(define (render-dock! win box monitor items trash? side)
   "Put ITEMS -- and the trash, when TRASH? -- in BOX, size it for MONITOR, and
 show WIN only when there is something in it.
 
@@ -363,35 +384,52 @@ dock with the trash on is never empty -- and the scale it drew them at.
 
 THE SEPARATOR IS ONLY BETWEEN THINGS: with no apps running there is nothing for
 it to separate the trash from, and ags2-shell leaves it out then too."
-  (let* ((width (list-ref (monitor-geometry monitor) 2))
+  (let* ((geometry (monitor-geometry monitor))
+         ;; THE LENGTH THE DOCK RUNS ALONG: the monitor's width along the
+         ;; bottom, its height down the side -- ags2-shell's `monitor_length'.
+         (length-along (list-ref geometry (if (eq? side 'left) 3 2)))
          (count (+ (length items) (if trash? 1 0)))
-         (scale (dock-scale count width))
+         (scale (dock-scale count length-along))
          (pixel-scale (* scale (ui-scale)))
          (icon-size (max 16 (px (* 64 pixel-scale))))
          (thickness (max 48 (px (* 94 scale (ui-scale))))))
     (clear-box! box)
     (for-each (lambda (item)
                 (add-child! box (if (favorite? item)
-                                    (favorite-tree item icon-size)
-                                    (group-icon-tree item icon-size))
+                                    (favorite-tree item icon-size side)
+                                    (group-icon-tree item icon-size side))
                             #f))
               items)
     (when trash?
       (when (pair? items)
-        (add-child! box (element <gtk-separator> #:class "dock-separator"
-                                 #:orientation 'vertical #:valign 'center
-                                 #:height-request icon-size)
+        ;; ACROSS THE DOCK, whichever way it runs: upright along the bottom,
+        ;; flat down the side.
+        (add-child! box (if (eq? side 'left)
+                            (element <gtk-separator> #:class "dock-separator"
+                                     #:orientation 'horizontal #:halign 'center
+                                     #:width-request icon-size)
+                            (element <gtk-separator> #:class "dock-separator"
+                                     #:orientation 'vertical #:valign 'center
+                                     #:height-request icon-size))
                     #f))
-      (add-child! box (trash-tree icon-size) #f))
-    (catch #t (lambda () (slot-set! box 'margin-bottom (px (* 16 pixel-scale))))
-           (lambda a #f))
-    (catch #t (lambda () (slot-set! win 'height-request thickness)) (lambda a #f))
+      (add-child! box (trash-tree icon-size side) #f))
+    ;; THE GAP TO THE EDGE, and the window's thickness, on the axis across the
+    ;; dock -- and the other axis put back, so switching edges leaves nothing of
+    ;; the last one behind.
+    (catch #t
+      (lambda ()
+        (let ((gap (px (* 16 pixel-scale))))
+          (slot-set! box 'margin-bottom (if (eq? side 'left) 0 gap))
+          (slot-set! box 'margin-start (if (eq? side 'left) gap 0)))
+        (slot-set! win 'height-request (if (eq? side 'left) -1 thickness))
+        (slot-set! win 'width-request (if (eq? side 'left) thickness -1)))
+      (lambda a #f))
     ;; WHETHER IT IS SHOWN IS NOT DECIDED HERE: that depends on the mode, the
     ;; pointer and fullscreen windows as well -- see `build-dock!'.  What this
     ;; answers is what that needs: whether there is anything, and how big.
     (list count pixel-scale)))
 
-(define (items-signature items focused trash)
+(define (items-signature items focused trash side)
   "What decides whether the dock must be redrawn -- TRASH is #f when it is off,
 and 'full or 'empty when it is on.
 
@@ -399,7 +437,7 @@ ags2-shell keeps the previous items and reuses any that did not change, for the
 same reason: the compositor reports EVERY change -- a title, a move, a focus
 anywhere -- and rebuilding the icons on each is a dock that flickers while you
 type.  So the dock is redrawn only when this changes."
-  (cons* focused trash
+  (cons* side focused trash
         (map (lambda (item)
                (if (favorite? item)
                    (list 'favorite (app-entry (cadr item)))
@@ -407,7 +445,7 @@ type.  So the dock is redrawn only when this changes."
                           (map wm-client-address (drop item 2)))))
              items)))
 
-(define* (build-dock! monitor #:key (name "dock-bottom"))
+(define* (build-dock! monitor #:key (name "dock"))
   "Build MONITOR's dock and keep it current.  Called once per monitor, inside the
 root `for-each-monitor' makes, so the monitor leaving disposes it.
 
@@ -422,6 +460,7 @@ strip is shown exactly when an autohide dock could be."
          (output (monitor-name monitor))
          (box (element <gtk-box> #:class "dock-container dock-horizontal"
                        #:orientation 'horizontal #:halign 'center #:valign 'end))
+         (side-now #f)
          (win (layer-window name
                             #:anchor '(bottom left right)
                             #:exclusivity 'exclusive
@@ -450,6 +489,24 @@ strip is shown exactly when an autohide dock could be."
          (zones '())          ; the windows the pointer is in: 'dock, 'zone
          (hovered #f)
          (hiding #f))
+    (define (apply-side! side)
+      ;; RE-ANCHORED IN PLACE, when the option changes -- ags2-shell's
+      ;; `side_config': the bottom edge, or the left edge top to bottom, with the
+      ;; container turned to run along it.
+      (unless (eq? side side-now)
+        (set! side-now side)
+        (catch #t
+          (lambda ()
+            (let ((anchor (if (eq? side 'left) '(left top bottom) '(bottom left right))))
+              (slot-set! win 'anchor anchor)
+              (slot-set! zone 'anchor anchor))
+            (slot-set! box 'orientation (if (eq? side 'left) 'vertical 'horizontal))
+            (slot-set! box 'halign (if (eq? side 'left) 'start 'center))
+            (slot-set! box 'valign (if (eq? side 'left) 'center 'end))
+            (toggle-class! box "dock-vertical" (eq? side 'left))
+            (toggle-class! box "dock-horizontal" (not (eq? side 'left))))
+          (lambda (key . rest)
+            (format (current-error-port) "scheme-desktop: dock: ~a ~s~%" key rest)))))
     (define (apply-visibility!)
       ;; DECIDED ON EVERY REFRESH, not only when the icons change: a fullscreen
       ;; window or the pointer leaving changes it with the icons the same.
@@ -462,7 +519,10 @@ strip is shown exactly when an autohide dock could be."
         (catch #t
           (lambda ()
             (slot-set! win 'exclusivity (if (and active? (not autohide?)) 'exclusive 'ignore))
-            (slot-set! zone 'height-request (max 16 (px (* 22 pixel-scale))))
+            (let ((thick (max 16 (px (* 22 pixel-scale))))
+                  (left? (eq? side-now 'left)))
+              (slot-set! zone 'height-request (if left? -1 thick))
+              (slot-set! zone 'width-request (if left? thick -1)))
             (slot-set! zone 'visible (and active? autohide?))
             (slot-set! win 'visible (and active? (or (not autohide?) hovered))))
           (lambda (key . rest)
@@ -471,12 +531,15 @@ strip is shown exactly when an autohide dock could be."
       (let* ((items (dock-items))
              (focused (catch #t (lambda () (wm-focused-client (wm))) (lambda a #f)))
              (trash? (dock-trash-enabled model))
+             (side (dock-position model))
              (signature (items-signature items focused
-                                         (and trash? (if (trash-has-items) 'full 'empty)))))
+                                         (and trash? (if (trash-has-items) 'full 'empty))
+                                         side)))
+        (apply-side! side)
         (unless (equal? signature last)
           (set! last signature)
           (catch #t
-            (lambda () (set! drawn (render-dock! win box monitor items trash?)))
+            (lambda () (set! drawn (render-dock! win box monitor items trash? side)))
             (lambda (key . rest)
               (format (current-error-port) "scheme-desktop: dock: ~a ~s~%" key rest))))
         (apply-visibility!)))
