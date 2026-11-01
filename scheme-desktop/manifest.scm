@@ -160,8 +160,8 @@ one broken widget in a plugin must not stop the rest of it."
         (display ";; scheme-desktop config.  Each widget is named by its module and\n" port)
         (display ";; class; the root lists which are live, the bar's layout which go\n" port)
         (display ";; where.  Rewritten when the shell changes an option.\n" port)
-        (write datum port)
-        (newline port)))
+        ;; One line per widget, as the config engine writes it -- see there.
+        (write-config-lines datum port)))
     (rename-file tmp shell-config-file)
     datum))
 

@@ -51,10 +51,11 @@
   ;; by hand here for that reason, and it comes out of the root like the rest.
   ;;
   ;; THE PLUGINS' MODULES RESOLVE FIRST, so that the names in the list can be.
-  ;; And THE LIST COMES FROM THE FILE -- written now, on a first run, by every
-  ;; built-in widget and installed plugin enabling itself -- so the root is made
-  ;; with it rather than with a default, and has its widgets before the rest of
-  ;; the file, their options, is applied to them.
+  ;; And THE LIST IS THE FILE'S -- written now when there is none, by every
+  ;; built-in widget and installed plugin enabling itself -- so the root has its
+  ;; widgets before the rest of the file, their options, is applied to them.
+  ;; An empty config is `run`'s, deliberately: a root made from a default list
+  ;; would put every widget in `-e main`, which is the live shell.
   (add-plugin-load-paths!)
   (register-desktop-widget!
    (make <desktop-root-widget> #:widgets (config-root-widgets (ensure-config!))))
