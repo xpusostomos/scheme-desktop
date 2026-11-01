@@ -90,7 +90,7 @@ takes it because every `widget-build' does."
              (icon (create-computed
                     (lambda () (bluetooth-glyph (powered) (connected)))
                     'bluetooth-glyph))
-             (btn (panel-button (desktop-widget-required 'bluetooth-panel)
+             (btn (panel-button (desktop-widget-required <bluetooth-panel-desktop-widget>)
                                 #:align (widget-section w)
                                 ;; ALWAYS ICON-ONLY, so the hover is always the
                                 ;; circle: this item has no name to show and no

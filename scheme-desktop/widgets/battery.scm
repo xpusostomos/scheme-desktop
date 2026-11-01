@@ -123,7 +123,7 @@ plausible-looking lie."
              (icon-visible (create-computed
                             (lambda () (or (show-icon) (not (show-pct))))))
              (pct-visible (create-computed (lambda () (show-pct))))
-             (btn (panel-button (desktop-widget-required 'battery-panel)
+             (btn (panel-button (desktop-widget-required <battery-panel-desktop-widget>)
                                 #:align (widget-section w)
                                 ;; ONE CHILD, because a GtkButton has room for
                                 ;; one: two labels passed to the button means the

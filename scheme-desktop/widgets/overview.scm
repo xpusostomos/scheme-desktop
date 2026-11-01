@@ -78,7 +78,7 @@ other sizes go into a CSS string, where 173.0px is merely wrong-looking."
 (define %default-count 7)
 
 (define (workspace-count)
-  (let ((w (desktop-widget-named 'workspaces)))
+  (let ((w (desktop-widget-named '(scheme-desktop widgets bar workspaces <workspaces-desktop-widget>))))
     (if w (workspaces-count w) %default-count)))
 
 ;;; ---------------------------------------------------------------------------

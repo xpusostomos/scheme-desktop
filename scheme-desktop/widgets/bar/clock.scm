@@ -23,6 +23,7 @@
   #:use-module (scheme-toolkit reactive)
   #:use-module (scheme-toolkit widget)
   #:use-module (scheme-toolkit app)
+  #:use-module (scheme-desktop splice)
   #:use-module (scheme-toolkit time)
   ;; For `run-command', which is what the poll's command procedure calls.
   #:use-module (scheme-toolkit process)
@@ -39,6 +40,12 @@
           #:accessor clock-format
           #:config '(string)
           #:label "Time format"))
+
+
+;; LIVE BUT NOT IN THE BAR: the date menu's button shows the time already, so the
+;; clock is there for a user who wants a second one, and is placed by hand.
+(define-method (widget-enable! (w <clock-desktop-widget>) config)
+  (config-splice-add-widget config w))
 
 (define (clock-command w)
   "The date command for W's configured format."
@@ -67,7 +74,7 @@ one would go on formatting with a dropped object's option."
           (create-poll 1000
                        (lambda ()
                          (run-command (clock-command
-                                       (desktop-widget-required 'clock)))))))
+                                       (desktop-widget-required <clock-desktop-widget>)))))))
   %clock-poll)
 
 (define-method (widget-build (w <clock-desktop-widget>) output)

@@ -29,6 +29,7 @@
   ;; been laid out.
   #:use-module (scheme-toolkit time)
   #:use-module (scheme-toolkit app)
+  #:use-module (scheme-desktop splice)
   #:use-module (scheme-desktop wm)
   #:use-module (scheme-desktop menu)
   #:use-module (scheme-desktop menu guards)
@@ -125,7 +126,7 @@
 ;; widget here; everything that does the work takes it as an argument, so a
 ;; second menu could exist without any of that changing.
 (define (menu-panel)
-  (desktop-widget-required 'menu-panel))
+  (desktop-widget-required <menu-panel-desktop-widget>))
 
 ;; The widget is `menu-panel' and its window is `menu'.  See the note on the date
 ;; menu's panel for why the window's name is declared this way.
@@ -579,6 +580,11 @@ GdkMonitor, and ours are keyed by the same name."
 
 (define-class <menu-desktop-widget> (<bar-item-widget>))
 
+
+;; THE MENU GOES AT THE LEFT END OF THE BAR, ahead of the workspaces.
+(define-method (widget-enable! (w <menu-desktop-widget>) config)
+  (config-splice-into-bar (config-splice-add-widget config w) w 'left 'beginning))
+
 (define-method (widget-build (w <menu-desktop-widget>) output)
   "The bar's far-left button: the distro's logo, or a search glyph.
 
@@ -589,7 +595,7 @@ No `on-clicked': `panel-button' already toggles the named window, which is the
 same path the date menu's button takes and the same one that is known to work.
 There is nothing a click needs to do beyond make the window visible -- the
 window renders itself when it is."
-  (panel-button (desktop-widget-required 'menu-panel)
+  (panel-button (desktop-widget-required <menu-panel-desktop-widget>)
                 #:align (widget-section w)
                 (element <gtk-image>
                          #:icon-name (or (distro-icon-name) %fallback-icon)

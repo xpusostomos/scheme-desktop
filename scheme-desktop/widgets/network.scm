@@ -645,7 +645,7 @@ state it reports."
          (name-visible (create-computed
                         (lambda ()
                           (and (show-name) (up)))))
-         (btn (panel-button (desktop-widget-required 'network-panel)
+         (btn (panel-button (desktop-widget-required <network-panel-desktop-widget>)
                             #:align (widget-section w)
                             ;; THE TWO LABELS GO IN A BOX, and a button needs one:
                             ;; a GtkButton has a SINGLE child, so passing the icon

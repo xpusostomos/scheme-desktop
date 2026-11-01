@@ -33,6 +33,6 @@
 The target is the PANEL widget, and the window it opens is named `powermenu' --
 see the window module.  PanelButton tracks that window's visibility to set its
 own `active' class, which is how the button shows the menu is open."
-  (panel-button (desktop-widget-required 'powermenu-panel)
+  (panel-button (desktop-widget-required '(scheme-desktop widgets power-menu window <powermenu-panel-desktop-widget>))
                 #:align (widget-section w)
                 (element <gtk-image> #:icon-name %shutdown-icon)))

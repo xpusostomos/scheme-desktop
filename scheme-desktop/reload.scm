@@ -45,7 +45,7 @@ simply disappear."
      ;; for the same reason: the root is what a hotplug disposes, so a monitor
      ;; that leaves takes its dock with it.  Only when the `dock' widget is LIVE
      ;; -- it is the user's list that says whether there is a dock, not this.
-     (when (desktop-widget-named 'dock)
+     (when (desktop-widget-named '(scheme-desktop widgets dock <dock-desktop-widget>))
        (catch #t
          (lambda () (build-dock! monitor))
          (lambda (key . rest)

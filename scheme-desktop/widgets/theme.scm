@@ -51,4 +51,4 @@
 
 (define (theme-widget)
   "THE theme widget, from the registry."
-  (desktop-widget-required 'theme))
+  (desktop-widget-required <theme-desktop-widget>))

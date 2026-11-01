@@ -73,7 +73,7 @@
     (dock-windows-set! w '())
     (length wins)))
 
-(define (dock) (desktop-widget-required 'dock))
+(define (dock) (desktop-widget-required <dock-desktop-widget>))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The items: running windows, grouped by application

@@ -174,7 +174,7 @@ what puts the padlock back when both options are off."
          (icon (create-computed (lambda () (if (any-active?) glyph-locked glyph-unlocked))))
          (icon-label (element <gtk-label> #:class "vpn-icon"
                               #:label icon #:visible icon-visible))
-         (btn (panel-button (desktop-widget-required 'vpn-panel)
+         (btn (panel-button (desktop-widget-required <vpn-panel-desktop-widget>)
                             #:align (widget-section w)
                             ;; A BOX, because a button has ONE child -- the second
                             ;; label would silently replace the first (the network

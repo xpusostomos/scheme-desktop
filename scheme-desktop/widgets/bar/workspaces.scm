@@ -22,6 +22,7 @@
   #:use-module (scheme-toolkit gi)
   #:use-module (scheme-toolkit widget)
   #:use-module (scheme-toolkit app)
+  #:use-module (scheme-desktop splice)
   #:use-module (scheme-toolkit config)
   #:use-module (scheme-desktop config)
   #:use-module (scheme-desktop wm)
@@ -67,6 +68,11 @@
          #:accessor workspaces-pills #:setter workspaces-pills-set!)
   (ours  #:init-value '()
          #:accessor workspaces-ours #:setter workspaces-ours-set!))
+
+
+;; THE WORKSPACES ARE ON THE LEFT, after the menu.
+(define-method (widget-enable! (w <workspaces-desktop-widget>) config)
+  (config-splice-into-bar (config-splice-add-widget config w) w 'left 'end))
 
 (define (workspace-count w)
   "How many numbers W shows.
@@ -134,7 +140,7 @@ conversion or replaces every class with one odd name, including GTK's own
               ;; there. Clicking your own workspace to switch to it would be a
               ;; no-op, so it earns the click.
               (if (= id (ours-for w output))
-                  (toggle-widget 'overview)
+                  (toggle-widget '(scheme-desktop widgets overview <overview-desktop-widget>))
                   (wm-focus-workspace! (wm) id))))
            (cons id btn)))
        (iota count 1)))

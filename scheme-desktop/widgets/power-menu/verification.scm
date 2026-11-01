@@ -239,7 +239,7 @@ THE GUARD IS ags2-shell's: nothing happens while the window is already open or a
 action is running, so a second click cannot re-answer for the first.  A keybinding
 may call this with anything, which is why an action outside the four is ignored
 rather than run."
-  (let ((w (desktop-widget-required 'powermenu-verification)))
+  (let ((w (desktop-widget-required <powermenu-verification-desktop-widget>)))
     (when (and (member action power-actions)
                (not (catch #t (lambda () (widget-visible? w)) (lambda a #f)))
                (not ((powermenu-verification-pending w))))
@@ -274,7 +274,7 @@ ags2-shell's sentence with the action's own name in it."
       ((powermenu-verification-pending w) #t)
       (catch #t
         (lambda ()
-          (catch #t (lambda () (widget-hide! (desktop-widget-required 'powermenu-panel)))
+          (catch #t (lambda () (widget-hide! (desktop-widget-required '(scheme-desktop widgets power-menu window <powermenu-panel-desktop-widget>))))
                     (lambda a #f))
           (widget-hide! w))
         (lambda a #f))

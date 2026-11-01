@@ -772,7 +772,7 @@ takes it because every `widget-build' does."
              (icon (create-computed
                     (lambda () (audio-glyph (muted) (volume)))
                     'audio-glyph))
-             (btn (panel-button (desktop-widget-required 'audio-panel)
+             (btn (panel-button (desktop-widget-required <audio-panel-desktop-widget>)
                                 #:align (widget-section w)
                                 #:class "icon-only"
                                 (element <gtk-label>

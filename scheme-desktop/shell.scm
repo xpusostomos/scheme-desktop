@@ -13,7 +13,9 @@
 ;; monitors, workspaces and clients and would work unchanged on another.
 (use-modules (scheme-desktop wm hyprland))
 (use-modules (scheme-desktop style))
-(use-modules (scheme-desktop widgets))      ; the root, and the shipped set
+(use-modules (scheme-desktop widgets))      ; the root's class
+;; The manifests, the plugins and the first-run config.  See below.
+(use-modules (scheme-desktop manifest))
 (use-modules (scheme-desktop widgets bar))
 ;; For `shell-config-file' and the one line that starts the widget config.
 (use-modules (scheme-desktop config))
@@ -47,7 +49,15 @@
   ;; BEFORE THE CONFIG, because the widgets the file's options belong to have to
   ;; exist before it is read.  The bar is one of them now -- it used to be built
   ;; by hand here for that reason, and it comes out of the root like the rest.
-  (register-desktop-widget! (make <desktop-root-widget>))
+  ;;
+  ;; THE PLUGINS' MODULES RESOLVE FIRST, so that the names in the list can be.
+  ;; And THE LIST COMES FROM THE FILE -- written now, on a first run, by every
+  ;; built-in widget and installed plugin enabling itself -- so the root is made
+  ;; with it rather than with a default, and has its widgets before the rest of
+  ;; the file, their options, is applied to them.
+  (add-plugin-load-paths!)
+  (register-desktop-widget!
+   (make <desktop-root-widget> #:widgets (config-root-widgets (ensure-config!))))
   ;; AND IT IS HANDED THE REBUILD, because changing the list is a model change
   ;; and the views have to follow: the root syncs the registry, then calls this,
   ;; and this is the same rebuild a changed bar layout option uses.  Without it

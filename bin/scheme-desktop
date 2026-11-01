@@ -49,6 +49,15 @@ case "${1:-run}" in
              "$DESKTOP_ROOT/scheme-desktop/shell.scm" "$@"
         ;;
 
+    install|remove|enable|disable|plugins)
+        # PLUGINS.  In Scheme, because enabling a widget means asking the widget
+        # -- its `widget-enable!' -- and that is Scheme code.  The same
+        # environment and load path as `run', so a plugin's classes resolve.
+        exec "$TOOLKIT_ROOT/bin/scheme-toolkit" guile \
+             -L "$DESKTOP_ROOT" \
+             -s "$DESKTOP_ROOT/tools/plugin-cli.scm" "$@"
+        ;;
+
     *)
         # Everything else is scheme-toolkit's (eval, repl, list, check-env).
         exec "$TOOLKIT_ROOT/bin/scheme-toolkit" "$@"

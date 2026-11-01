@@ -15,6 +15,9 @@
   #:use-module (scheme-toolkit reactive)
   #:use-module (scheme-toolkit widget)
   #:use-module (scheme-toolkit app)
+  ;; `config-splice', for `add-widget!': a layout section is the same shape as
+  ;; any config list, so it is edited the way a plugin edits the config.
+  #:use-module (scheme-toolkit config-splice)
   #:use-module (scheme-toolkit time)
   ;; NO WIDGET MODULES AND NO REGISTRY.  The bar resolves the names in its
   ;; layout against the REGISTRY -- `desktop-widget-named', from the toolkit --
@@ -200,9 +203,12 @@ anchored to one edge and styled for the other."
   ;; authoritative once it exists, and the shell writes its in-memory layout back
   ;; to it, so a machine whose file still says `volume' keeps saying it.  Keeping
   ;; this in step is what makes a fresh install correct.
-  (layout #:init-value '((left   menu workspaces)
-                         (center datemenu)
-                         (right  media tray network audio bluetooth battery))
+  ;; EMPTY BY DEFAULT, in the shape a section has: (left (NAME ...)).  What is in
+  ;; the bar on a first run is not written here any more -- each widget puts
+  ;; itself in with its `widget-enable!', and the first run writes the result to
+  ;; config.scm.  A default here would be a second list to keep in step, and it
+  ;; went out of step the first time a widget was added.
+  (layout #:init-value '((left ()) (center ()) (right ()))
           #:accessor bar-layout #:setter bar-layout-set!
           #:config '(list) #:label "Which widgets, and where"
           ;; NOT A REBUILD ANY MORE.  A layout change adds, removes and moves
@@ -295,8 +301,8 @@ rather than GTK's."
   ;; Both, so the option and the resolved view cannot drift.  This is the
   ;; RUNTIME form -- a settings window or a drag between sections -- not the
   ;; path a rebuild takes, which resolves `layout' into `widgets' directly.
-  (bar-layout-set! bar (append (bar-layout bar)
-                               (list (cons position (string->symbol (widget-name widget))))))
+  (bar-layout-set! bar (config-splice (bar-layout bar) (list '() position '())
+                                      (widget-name widget) 'end))
   bar)
 
 (define (centerbox-slot position)
@@ -308,46 +314,22 @@ rather than GTK's."
   (map cdr (filter (lambda (pair) (eq? (car pair) position)) (bar-widgets bar))))
 
 (define (bar-widget-names)
-  "Every registered widget name, sorted.  For the warning below."
-  (sort (desktop-widget-names)
-        (lambda (a b) (string<? a b))))
+  "Every registered widget's name, as text, sorted.  For the warning below."
+  (sort (map (lambda (n) (format #f "~s" n)) (desktop-widget-names)) string<?))
 
-;;; A WIDGET THAT WAS RENAMED KEEPS ITS PLACE IN A SAVED CONFIG.
-;;
-;; `welcome' was deleted and `volume' was replaced by `audio', and in both cases
-;; the shipped DEFAULT was updated while every existing config.scm still named the
-;; old widget -- and the file is authoritative once it exists.  So an existing
-;; user's bar came up one widget short, for ever, on a build whose fresh default
-;; was correct.  The user's report was "the config lost my widget, I have to
-;; delete config.scm", five times over, and this table is what stops that: the
-;; old name is translated rather than dropped, so the slot survives the change.
-;;
-;; A RENAMED WIDGET ONLY -- a name with no successor is not here and falls through
-;; to `prune-layout!', which drops it.
-(define %renamed-widgets
-  '((volume . audio)))
+(define (section-names section)
+  "The names in one layout SECTION, `(right (NAME ...))'."
+  (if (and (pair? (cdr section)) (list? (cadr section))) (cadr section) '()))
 
 (define (prune-layout! model)
-  "Translate renamed widgets in MODEL's layout, then drop names nothing knows.
+  "Drop the names in MODEL's layout that no live widget has.
 
-WHY THIS IS NOT JUST A WARNING, and it is the bug the user hit five times over
-without either of us seeing it.  `resolve-layout!' used to SKIP an unknown name
+WHY THIS IS NOT JUST A WARNING.  `resolve-layout!' used to SKIP an unknown name
 and say so, which is right for one startup -- the bar comes up one widget short
 and the message explains it.  But the layout is a SAVED option and the shell
-writes its in-memory layout back to config.scm on exit, so the unknown name was
-written out again, and again, for ever.  Deleting config.scm helped only because
-the default is correct.
-
-The name that did it here was `volume': `audio' replaced it (the panel does the
-volume, the old bar item was deleted -- see the note on the `layout' slot), the
-bar's DEFAULT was kept in step, and the FILE was not, because a file is
-authoritative once it exists.
-
-A RENAME IS NOT A PRUNE.  Dropping `volume' leaves its slot empty, which is
-still a bar missing a widget -- just a quiet one.  `%renamed-widgets' is asked
-first, so `volume' becomes `audio' and the slot is kept.  A rename is skipped
-when the new name is ALREADY in the same section, so a config that somehow has
-both does not end up with two audio items.
+writes its in-memory layout back to config.scm, so the unknown name was written
+out again, and again, for ever.  A plugin that is removed, or a widget disabled
+without being taken out of the bar, leaves exactly that behind.
 
 The repair runs BEFORE the file is next written, not only when the layout is
 read: the corrected layout is what gets saved, so one startup heals the file
@@ -357,18 +339,14 @@ AND IT ASKS FOR THE WRITE ITSELF.  `bar-layout-set!' is the plain GOOPS setter
 rather than the config engine's ticking one, so writing the slot marks nothing
 dirty and schedules no save -- correct for the ordinary path (the engine owns
 that) and wrong for a repair made during startup, where there is no later change
-to carry it out.  `widget-config-save!' writes now; a repair happens once per
-renamed widget, not per frame, so the debounce has nothing to coalesce.
+to carry it out.  `widget-config-save!' writes now.
 
 Returns #t when the layout changed."
   (let* ((layout (bar-layout model))
-         (fix-name (lambda (name) (or (assq-ref %renamed-widgets name) name)))
          (fixed (map (lambda (section)
-                       (let* ((names (cdr section))
-                              (translated (map fix-name names))
-                              (known (filter (lambda (n) (desktop-widget-named n))
-                                             translated)))
-                         (cons (car section) (delete-duplicates known))))
+                       (let ((known (filter (lambda (n) (desktop-widget-named n))
+                                            (section-names section))))
+                         (list (car section) (delete-duplicates known))))
                      layout)))
     (if (equal? fixed layout)
         #f
@@ -400,7 +378,7 @@ which section listed it, and what the valid names are."
                            "scheme-desktop: ~s is not a bar widget, skipping it (listed in the ~s section).~%  valid names: ~s~%"
                            name position (bar-widget-names))
                    #f))))
-         (cdr section))))
+         (section-names section))))
     (bar-layout model))))
 
 (define (bar)
@@ -420,7 +398,7 @@ reload -- all by the same code path every other widget takes.
 AND THE LAYOUT IS STILL RESOLVED AT BUILD TIME, in `build-bar!'.  That has not
 changed and must not: the layout is a file option, so the names it holds cannot
 become widgets until the file has been read, which is after this returns."
-  (desktop-widget-required 'bar))
+  (desktop-widget-required <bar-desktop-widget>))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Filling a section, and keeping it filled

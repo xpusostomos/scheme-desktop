@@ -215,7 +215,7 @@ explicit rather than a rename: omarchy's `background' is their `bg', its
 READ OFF THE BAR WIDGET, which owns the option, rather than declared here: this
 is the value the stylesheet is generated from, and generating it at the moment it
 is asked for is what makes changing the option a restyle."
-  (let ((bar (catch #t (lambda () (desktop-widget-named 'bar)) (lambda args #f))))
+  (let ((bar (catch #t (lambda () (desktop-widget-named '(scheme-desktop widgets bar <bar-desktop-widget>))) (lambda args #f))))
     (or (and bar (catch #t (lambda () (slot-ref bar 'icon-button-size))
                         (lambda args #f)))
         %default-icon-button-size)))
@@ -231,7 +231,7 @@ setting four of them separately is four chances to disagree.  The bar has had an
 
 `color-mix' rather than an rgba literal: the palette is sRGB hex, and mixing it
 towards transparent keeps whatever hue the wallpaper chose."
-  (let ((theme (catch #t (lambda () (desktop-widget-named 'theme)) (lambda args #f))))
+  (let ((theme (catch #t (lambda () (desktop-widget-named '(scheme-desktop widgets theme <theme-desktop-widget>))) (lambda args #f))))
     (let ((v (and theme (catch #t (lambda () (slot-ref theme 'panel-opacity))
                                (lambda args #f)))))
       (if (and (number? v) (>= v 0.2) (<= v 1)) v %default-panel-opacity))))

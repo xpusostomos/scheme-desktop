@@ -28,6 +28,7 @@
   ;; For `run-command', which the poll's command procedure calls.
   #:use-module (scheme-toolkit process)
   #:use-module (scheme-toolkit app)
+  #:use-module (scheme-desktop splice)
   #:use-module (scheme-toolkit config)
   #:use-module (scheme-desktop config)
   #:use-module (scheme-desktop widgets date-menu calendar)
@@ -51,6 +52,11 @@
                #:config '(string)
                #:label "Date format"))
 
+
+;; THE DATE IS THE CENTRE OF THE BAR.
+(define-method (widget-enable! (w <datemenu-desktop-widget>) config)
+  (config-splice-into-bar (config-splice-add-widget config w) w 'center 'end))
+
 (define (date-command w)
   (list "date" (string-append "+" (datemenu-date-format w))))
 
@@ -72,7 +78,7 @@ first."
           (create-poll 1000
                        (lambda ()
                          (run-command (date-command
-                                       (desktop-widget-required 'datemenu)))))))
+                                       (desktop-widget-required <datemenu-desktop-widget>)))))))
   %date-poll)
 
 (define-method (widget-build (w <datemenu-desktop-widget>) output)
@@ -80,7 +86,7 @@ first."
 
 The label is the clock in the configured format -- ags2-shell's default
 \"%a %b %-d %H:%M\", which reads \"Tue Oct 27 23:37\"."
-  (panel-button (desktop-widget-required 'datemenu-panel)
+  (panel-button (desktop-widget-required <datemenu-panel-desktop-widget>)
                 #:align (widget-section w)
                 #:halign 'center
                 (element <gtk-label> #:valign 'center #:label (date-poller))))
