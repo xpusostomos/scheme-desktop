@@ -172,6 +172,8 @@ what puts the padlock back when both options are off."
          (name-visible (create-computed (lambda () (and (show-name) (any-active?)))))
          (icon-visible (create-computed (lambda () (or (show-icon) (not (name-visible))))))
          (icon (create-computed (lambda () (if (any-active?) glyph-locked glyph-unlocked))))
+         (icon-label (element <gtk-label> #:class "vpn-icon"
+                              #:label icon #:visible icon-visible))
          (btn (panel-button (desktop-widget-required 'vpn-panel)
                             #:align (widget-section w)
                             ;; A BOX, because a button has ONE child -- the second
@@ -179,10 +181,17 @@ what puts the padlock back when both options are off."
                             ;; item learned this the hard way).
                             (element <gtk-box> #:orientation 'horizontal
                                      #:class "vpn-item" #:halign 'center
-                                     (element <gtk-label> #:class "vpn-icon"
-                                              #:label icon #:visible icon-visible)
+                                     (this! icon-label)
                                      (element <gtk-label> #:class "vpn-name"
                                               #:label names #:visible name-visible)))))
+    ;; WHICH PADLOCK, AS A CLASS ON THE GLYPH, because the two need different
+    ;; centring: a Nerd Font glyph's ink is wider than its cell and Pango centres
+    ;; by the cell, and the two padlocks are off by different amounts -- measured
+    ;; with `pango-layout-get-pixel-extents' in a 9px cell, the closed one's ink
+    ;; is 10px (0.5px right of centre) and the open one's 13px (2px right).  The
+    ;; stylesheet compensates for each; see `.vpn-icon' there.
+    (create-effect (lambda () (toggle-class! icon-label "locked" (any-active?)))
+                   #:immediate #t)
     (on-button! btn 3 vpn-toggle-active!)
     (on-button! btn 2 vpn-refresh!)
     ;; DIMMED WHILE NOTHING IS UP, and lit when something is -- the plugin's

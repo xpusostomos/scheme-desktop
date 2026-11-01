@@ -1886,6 +1886,35 @@ button.active-vpn .vpn-icon {
   margin-left: 0.4em;
 }
 
+/* THE HOVER CIRCLE, ON THE GLYPH -- the network, battery, bluetooth and audio
+   items' arrangement.  In the icon-only state the BUTTON paints nothing on hover
+   (the rule above `.network-icon' says so for every panel button), so an item
+   without a rule of its own for its glyph gets no hover at all: which is what
+   this item had.
+
+   The box is the slot minus the padding, as the network glyph's is, and the
+   padding is the centring.  A Nerd Font glyph's ink is wider than its cell and
+   Pango centres by the cell, so a right padding of twice the error moves it back.
+   Measured with `pango-layout-get-pixel-extents', 9px cell: the OPEN padlock's
+   ink is 13px, 2px right of centre (0.27em, on the wifi glyph's scale of 2.5px
+   for 0.4em); the CLOSED one's is 10px, 0.5px right (0.07em). */
+window#bar button.panel-button.icon-only .vpn-icon {
+  min-width: calc(var(--icon-button-size) - 0.27em);
+  min-height: var(--icon-button-size);
+  padding: 0 0.27em 0 0;
+}
+
+window#bar button.panel-button.icon-only .vpn-icon.locked {
+  min-width: calc(var(--icon-button-size) - 0.07em);
+  padding: 0 0.07em 0 0;
+}
+
+window#bar button.panel-button.icon-only:hover:not(.active) .vpn-icon,
+window#bar button.panel-button.icon-only:active .vpn-icon {
+  background-color: var(--hover-bg);
+  border-radius: 50%;
+}
+
 window#vpn .vpn-panel {
   background-color: var(--bg);
   border: var(--border-width) solid var(--popover-border-color);
