@@ -41,7 +41,7 @@
             read-config-datum write-config-datum! ensure-config!
             config-root-widgets
             plugin-install! plugin-enable! plugin-disable! plugin-remove!
-            plugin-clone! plugin-delete!
+            plugin-clone! plugin-delete! plugin-update!
             enable-entries disable-entries))
 
 ;;; ---------------------------------------------------------------------------
@@ -267,6 +267,22 @@ REFUSES A CLONE WITH NO MANIFEST, and removes it again: a repository without a
       (system* "rm" "-rf" dir)
       (error (format #f "~a has no widgets.scm at its top, so it is not a plugin" url)))
     name))
+
+(define (plugin-update! name)
+  "Pull plugin NAME's latest commits.  Its options and its place in the config are
+kept -- which is the difference from removing and installing it again.
+
+FAST-FORWARD ONLY: a plugin directory is a clone nobody edits, so anything but a
+fast-forward means somebody did, and merging into their work is not this
+command's to do.
+
+A RUNNING SHELL KEEPS THE CODE IT LOADED: Guile does not reload a module because
+its file changed, so the new code arrives at the shell's next start."
+  (require-plugin name)
+  (let ((dir (string-append (plugins-directory) "/" name)))
+    (unless (zero? (status:exit-val (system* "git" "-C" dir "pull" "--ff-only")))
+      (error (format #f "git pull in ~a failed" dir))))
+  #t)
 
 (define (plugin-remove! name)
   "Disable plugin NAME, then delete it."

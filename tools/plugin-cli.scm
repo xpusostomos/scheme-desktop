@@ -4,6 +4,7 @@
 ;;;   scheme-desktop remove NAME     disable it, then delete it
 ;;;   scheme-desktop enable NAME     add all its widgets to the config
 ;;;   scheme-desktop disable NAME    take them out; it stays installed
+;;;   scheme-desktop update NAME     pull its latest commits; options are kept
 ;;;   scheme-desktop plugins         what is installed
 ;;;
 ;;; WHETHER THE SHELL IS RUNNING DECIDES WHERE A CHANGE GOES.  A running shell
@@ -44,7 +45,7 @@
   (format #t "~ad ~a~a~%" verb name (if (shell-running?) "" " (config.scm; the shell is not running)")))
 
 (define (usage)
-  (format #t "scheme-desktop install URL | remove NAME | enable NAME | disable NAME | plugins~%")
+  (format #t "scheme-desktop install URL | remove NAME | enable NAME | disable NAME | update NAME | plugins~%")
   2)
 
 (define (main args)
@@ -63,6 +64,11 @@
         0)
        ((and (= (length args) 2) (member (car args) '("enable" "disable")))
         (enable-or-disable! (car args) (cadr args))
+        0)
+       ((and (= (length args) 2) (string=? (car args) "update"))
+        (plugin-update! (cadr args))
+        (format #t "updated ~a~a~%" (cadr args)
+                (if (shell-running?) "; restart the shell to run the new code" ""))
         0)
        ((and (= (length args) 1) (string=? (car args) "plugins"))
         (for-each (lambda (n) (format #t "~a~%" n)) (plugin-names))
