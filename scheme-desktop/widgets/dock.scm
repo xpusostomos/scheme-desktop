@@ -31,6 +31,8 @@
   #:use-module (scheme-toolkit widget)
   #:use-module (scheme-toolkit app)
   #:use-module (scheme-toolkit services apps)
+  ;; `timeout', for a launcher's quarter-second `launching' class.
+  #:use-module (scheme-toolkit time)
   #:use-module (scheme-desktop wm)
   #:use-module (scheme-desktop widgets theme)
   ;; The trash at the end of the dock: whether it is full, and opening it.
@@ -61,11 +63,25 @@
   ;; `options.dock.trash', on by default as it is there.  Turned off, the icon
   ;; goes and so does the watch on the trash: nothing looks at the trash that
   ;; nothing shows.
+;; THE PINNED APPLICATIONS, as desktop entries -- "firefox.desktop", or
+  ;; "firefox", or the name a person reads, "Firefox" -- first in the dock,
+  ;; in this order.  A pinned app that is running holds its windows in its own
+  ;; place; one that is not is a launcher.
+  ;;
+  ;; ags2-shell reads these from GNOME's `/org/gnome/shell/favorite-apps' --
+  ;; through `dconf', watched -- and on a desktop that is not GNOME that key is
+  ;; empty, as it is on the machine this was written on.  So here they are a
+  ;; dock option, in config.scm with every other setting.
+  (favorites #:init-value '() #:init-keyword #:favorites
+             #:accessor dock-favorites
+             #:config '(list)
+             #:label "Pinned applications"
+             #:apply (lambda (w names) (dock-options-changed! w)))
   (trash-enabled #:init-value #t #:init-keyword #:trash-enabled
                  #:accessor dock-trash-enabled
                  #:config '(boolean)
                  #:label "Show the trash in the dock"
-                 #:apply (lambda (w on) (dock-trash-changed! w)))
+                 #:apply (lambda (w on) (dock-options-changed! w)))
   ;; ONE WINDOW PER MONITOR, keyed by its output, and the box in each that the
   ;; icons go in.  The same arrangement as the bar's, for the same reason: these
   ;; lists are the only record of the windows, so `widget-windows' answers from
@@ -103,8 +119,9 @@
          (%release-trash)
          (set! %release-trash #f))))
 
-(define (dock-trash-changed! w)
-  "The trash option changed: start or stop the watch, and redraw every dock."
+(define (dock-options-changed! w)
+  "A dock option changed -- the trash, the pinned apps: start or stop the trash's
+watch to match, and redraw every monitor's dock."
   (sync-trash-watcher! w)
   (for-each (lambda (entry)
               (when (> (length entry) 3)
@@ -140,6 +157,15 @@ layer, a half-mapped window), and an icon for it would be an icon for nothing."
               '()
               clients))
 
+(define (group-app class clients apps)
+  "The application a group's windows belong to, or #f -- #f, too, when they do
+not agree (see `group-icon')."
+  (let* ((matches (map (lambda (c)
+                         (app-for-window class #:title (wm-client-title c) #:apps apps))
+                       clients))
+         (first-app (car matches)))
+    (and first-app (every (lambda (m) (eq? m first-app)) matches) first-app)))
+
 (define (group-icon class clients apps)
   "The icon for a group: its application's, or the class itself.
 
@@ -159,12 +185,34 @@ is the last resort."
         "application-x-executable-symbolic")))
 
 (define (dock-items)
-  "The dock's groups, as ((CLASS ICON CLIENT ...) ...)."
-  (let ((apps (apps-catalog)))
-    (map (lambda (group)
-           (let ((class (car group)) (clients (cdr group)))
-             (cons* class (group-icon class clients apps) clients)))
-         (group-by-class (dock-clients)))))
+  "The dock's items, in order: a running group is (CLASS ICON CLIENT ...), a
+pinned application that is not running is (favorite APP).
+
+ags2-shell's `create_dock_items', in its order.  The PINNED apps first, each in
+its place: a running one holds its windows there -- the group moves to the pinned
+slot rather than appearing twice -- and one with no windows is a launcher.  Then
+every running group no pinned app claimed, in workspace order."
+  (let* ((apps (apps-catalog))
+         (groups (map (lambda (g)
+                        (list (car g) (group-app (car g) (cdr g) apps) (cdr g)))
+                      (group-by-class (dock-clients))))
+         (group-item (lambda (g)
+                       (let ((class (list-ref g 0)) (app (list-ref g 1)) (clients (list-ref g 2)))
+                         (cons* class
+                                (or (and app (app-icon-name app))
+                                    (and (not (string-null? class)) class)
+                                    "application-x-executable-symbolic")
+                                clients))))
+         (pinned (apps-named (dock-favorites (dock)) #:apps apps))
+         (claimed? (lambda (g) (any (lambda (f) (same-app? (list-ref g 1) f)) pinned))))
+    (append
+     (map (lambda (f)
+            (let ((g (find (lambda (g) (same-app? (list-ref g 1) f)) groups)))
+              (if g (group-item g) (list 'favorite f))))
+          pinned)
+     (map group-item (remove claimed? groups)))))
+
+(define (favorite? item) (eq? (car item) 'favorite))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Sizes
@@ -256,6 +304,28 @@ ags2-shell's `focus_next': clicking an app's icon again walks its windows."
 ;;; One monitor's dock
 ;;; ---------------------------------------------------------------------------
 
+(define (favorite-tree item icon-size)
+  "A pinned application with no windows: its icon, starting it on a click.
+
+ags2-shell's `FavoriteIcon', including its `launching' class for a quarter of a
+second -- the bounce that says the click was heard, before the window exists."
+  (let* ((app (cadr item))
+         (button (element <gtk-button> #:class "app-button"
+                          #:tooltip-text (or (app-name app) "")
+                          #:can-focus #f
+                          (element <gtk-image>
+                                   #:icon-name (or (app-icon-name app)
+                                                   "application-x-executable-symbolic")
+                                   #:use-fallback #t #:pixel-size icon-size))))
+    (connect-signal! button "clicked"
+                     (lambda (b)
+                       (toggle-class! button "launching" #t)
+                       (app-launch! app)
+                       (timeout 250 (lambda () (toggle-class! button "launching" #f)))))
+    (element <gtk-box> #:class "dock-icon dock-horizontal"
+             #:orientation 'vertical #:halign 'center
+      (this! button))))
+
 (define (trash-tree icon-size)
   "The trash: full or empty, opening it on a click.  ags2-shell's `TrashIcon'."
   (let ((full (trash-has-items)))
@@ -285,7 +355,12 @@ it to separate the trash from, and ags2-shell leaves it out then too."
          (icon-size (max 16 (px (* 64 pixel-scale))))
          (thickness (max 48 (px (* 94 scale (ui-scale))))))
     (clear-box! box)
-    (for-each (lambda (item) (add-child! box (group-icon-tree item icon-size) #f)) items)
+    (for-each (lambda (item)
+                (add-child! box (if (favorite? item)
+                                    (favorite-tree item icon-size)
+                                    (group-icon-tree item icon-size))
+                            #f))
+              items)
     (when trash?
       (when (pair? items)
         (add-child! box (element <gtk-separator> #:class "dock-separator"
@@ -308,8 +383,10 @@ anywhere -- and rebuilding the icons on each is a dock that flickers while you
 type.  So the dock is redrawn only when this changes."
   (cons* focused trash
         (map (lambda (item)
-               (cons* (list-ref item 0) (list-ref item 1)
-                      (map wm-client-address (drop item 2))))
+               (if (favorite? item)
+                   (list 'favorite (app-entry (cadr item)))
+                   (cons* (list-ref item 0) (list-ref item 1)
+                          (map wm-client-address (drop item 2)))))
              items)))
 
 (define* (build-dock! monitor #:key (name "dock-bottom"))
