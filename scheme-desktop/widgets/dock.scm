@@ -147,9 +147,15 @@
   "A dock option changed -- the trash, the pinned apps: start or stop the trash's
 watch to match, and redraw every monitor's dock."
   (sync-trash-watcher! w)
+  ;; EACH MONITOR'S REDRAW IN ITS OWN ROOT, for the bar's reason: this runs from
+  ;; a config watcher, where no scope is current, so a rebuilt tree's cleanups
+  ;; would be registered nowhere.
   (for-each (lambda (entry)
               (when (> (length entry) 3)
-                (catch #t (list-ref entry 3) (lambda a #f))))
+                (catch #t
+                       (lambda ()
+                         (in-monitor-scope (car entry) (lambda () ((list-ref entry 3)))))
+                       (lambda a #f))))
             (dock-windows w)))
 
 ;;; ---------------------------------------------------------------------------
@@ -577,12 +583,21 @@ strip is shown exactly when an autohide dock could be."
     (refresh!)
     ;; THE TRASH FILLING OR EMPTYING REDRAWS THE DOCK.  An effect on its
     ;; accessor, in this monitor's root, so it ends with the dock.
-    (create-effect (lambda () (trash-has-items) (refresh!)))
+    ;; AND THIS ONE: an effect runs in the root that created it, but `refresh!'
+    ;; is called from inside it with the effect's own tracking -- harmless here,
+    ;; and NOT the same thing as the effect being the scope.  Kept explicit.
+    (create-effect (lambda () (trash-has-items) (in-monitor-scope output refresh!)))
     ;; THE COMPOSITOR SAYS WHEN ANYTHING CHANGED -- a window, the focus, a
     ;; fullscreen -- and `refresh!' decides what that means for the dock.  The
     ;; disconnect is registered with the monitor's root, so an unplugged monitor
     ;; stops being redrawn.
-    (let ((stop (wm-on-change (wm) refresh!)))
+    ;; THE COMPOSITOR'S CALLBACK RUNS OUTSIDE ANY SCOPE.  `wm-on-change' is a
+    ;; GObject signal, so nothing parameterized is in force when it fires --
+    ;; and `refresh!' builds trees that register timers and handlers, which went
+    ;; nowhere.  The dock coming back from the left edge is what showed it:
+    ;; re-anchoring both windows makes the compositor report a change, and every
+    ;; rebuild after that printed a warning per cleanup.
+    (let ((stop (wm-on-change (wm) (lambda () (in-monitor-scope output refresh!)))))
       (on-cleanup (lambda ()
                     (catch #t stop (lambda a #f))
                     (catch #t (lambda () (destroy zone)) (lambda a #f))

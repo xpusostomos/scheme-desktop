@@ -519,6 +519,11 @@ skipped at every startup for ever.  See `prune-layout!'."
 
 (define (bar-apply-layout! w)
   "A changed layout: reconcile every monitor's bar, and build none of them."
+  ;; EACH MONITOR'S REDRAW RUNS IN THAT MONITOR'S ROOT.  This runs from a config
+  ;; watcher on the main loop -- the layout option's `#:apply', and the widget
+  ;; list changing -- so no scope is current here, and every `on-cleanup' in a
+  ;; rebuilt tree was registered nowhere: timers and signal handlers that never
+  ;; went away.  One warning per build was the only sign.
   (let ((outputs (map car (bar-sections w))))
     (if (null? outputs)
         ;; NO BAR IS BUILT YET -- startup, where the file is read before the
@@ -526,7 +531,9 @@ skipped at every startup for ever.  See `prune-layout!'."
         ;; does get built is right, and pruned first for the same reason as
         ;; `reconcile-bar!': the repair must reach the file.
         (begin (prune-layout! w) (resolve-layout! w))
-        (for-each (lambda (output) (reconcile-bar! w output)) outputs)))
+        (for-each (lambda (output)
+                    (in-monitor-scope output (lambda () (reconcile-bar! w output))))
+                  outputs)))
   #t)
 
 (define (build-sections! model output)
