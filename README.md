@@ -6,7 +6,7 @@ A GTK4 Wayland desktop shell in Guile Scheme, built on
 **Status: D1.** The bar renders on every monitor, with a live clock.
 See `AGENTS.md` for the full plan.
 
-[Screen Shot](images/screenshot-1.jpg)
+![Screen Shot](images/screenshot-1.jpg)
 
 ## Run it
 
