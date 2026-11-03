@@ -35,6 +35,7 @@
             menu-splice
             menu-row? menu-row-entry menu-row-label menu-row-icon
             menu-row-icon-name menu-row-submenu? menu-row-disabled?
+            menu-row-type menu-row-value row-of
             applisting)
   ;; RE-export, not export. These are bound in (scheme-desktop menu omarchy),
   ;; and `#:export' of a name this module only IMPORTED publishes nothing --
@@ -179,7 +180,7 @@ draws as text. One field per widget, and nothing has to guess which it is."
 ;;; ---------------------------------------------------------------------------
 
 (define-record-type <menu-row>
-  (make-menu-row entry label icon icon-name submenu? disabled? checked?)
+  (make-menu-row entry label icon icon-name submenu? disabled? type value)
   menu-row?
   (entry menu-row-entry)
   (label menu-row-label)
@@ -187,7 +188,16 @@ draws as text. One field per widget, and nothing has to guess which it is."
   (icon-name menu-row-icon-name)
   (submenu? menu-row-submenu?)
   (disabled? menu-row-disabled?)
-  (checked? menu-row-checked?))
+  ;; WHAT KIND OF SETTING THIS ROW IS -- 'boolean, 'number, 'string, 'option, or
+  ;; #f for a row that is only an ACTION.  A row with a type can be EDITED, not
+  ;; only chosen: see `menu-row-value' and the editors in (scheme-desktop widgets
+  ;; menu).  TYPED ROWS ARE NOT INSTALLED OR NOT, the way Omarchy's menus are --
+  ;; they are settings, and their box says what the setting currently is.
+  (type menu-row-type)
+  ;; THE CURRENT VALUE, as text, or #f when it could not be read.  Text rather
+  ;; than the value itself, because a value comes from either bash's output or a
+  ;; Scheme procedure, and text is what both can be.
+  (value menu-row-value))
 
 (define (guard-status session value module)
   "VALUE's status, or 'unknown when there is no session to ask.
@@ -199,8 +209,16 @@ point of 'unknown is that it is not a no."
         (else (guard-value-status session value #:module module))))
 
 (define* (row-of entry #:key session (module (menu-resolution-module)))
-  "ENTRY as a row, or #f when its `when' hides it."
-  (let* ((checked (guard-status session (entry-ref entry 'checked) module))
+  "ENTRY as a row, or #f when its `when' hides it.
+
+A TYPED ROW -- one with a `type' -- is a SETTING: its `value' is read (that is
+what the box shows) and its action, when it has one, runs when the row is
+chosen.  Omarchy's `checked' still works and still means a boolean, so a menu
+written the old way keeps working; `value' is what to write now."
+  (let* ((type (let ((t (entry-ref entry 'type)))
+                 (and t (if (string? t) (string->symbol t) t))))
+         (value-field (or (entry-ref entry 'value) (entry-ref entry 'checked)))
+         (checked (guard-status session value-field module))
          (disabled (guard-status session (entry-ref entry 'disabled) module))
          ;; NO `when' MEANS VISIBLE -- which is not the same as a `when' that
          ;; answered false, and the difference cost every row in the menu.
@@ -214,9 +232,10 @@ point of 'unknown is that it is not a no."
          (base (or (entry-ref entry 'label) "")))
     (and visible
          (make-menu-row entry
-                        (if (guard-status->checked? checked)
-                            (string-append base " ✓")
-                            base)
+                        ;; NO TICK ON THE LABEL ANY MORE.  It is drawn in a box at
+                        ;; the end of the row, where a box belongs, and where a
+                        ;; label's width does not move when the value changes.
+                        base
                         (entry-ref entry 'icon)
                         (entry-ref entry 'icon-name)
                         ;; A SUBMENU IS ANY ROW THAT OPENS SOMETHING, and a
@@ -230,7 +249,35 @@ point of 'unknown is that it is not a no."
                                  (entry-provider entry))
                              #t)
                         (guard-status->disabled? disabled)
-                        (guard-status->checked? checked)))))
+                        ;; A ROW WHOSE VALUE IS A PROCEDURE READS ITSELF: a
+                        ;; generated row does not know its value until it is
+                        ;; drawn, and reading it here is what makes the box show
+                        ;; the current setting.
+                        ;;
+                        ;; A ROW WRITTEN THE OLD WAY IS A BOOLEAN.  `checked' was
+                        ;; evaluated for its truth and a tick glued to the label;
+                        ;; it is now the same thing as `type boolean' with that
+                        ;; field as the value, so an existing Omarchy menu keeps
+                        ;; its ticks -- in the box at the end of the row rather
+                        ;; than on the label.  No type and no `checked' is a row
+                        ;; with no value at all, which is most of them.
+                        (cond (type type)
+                              ((entry-ref entry 'checked) 'boolean)
+                              (else #f))
+                        ;; READ ONLY FOR A ROW THAT HAS ONE, and only when a
+                        ;; session can read it: an untyped row has no value to
+                        ;; show, and reading one for every row would ask the shell
+                        ;; a question per row for nothing.
+                        (cond
+                         ((not value-field) #f)
+                         ;; ALREADY A VALUE: a procedure, which the row carries
+                         ;; and calls for itself -- no shell involved.
+                         ((procedure? value-field) (guard-value->text (value-field)))
+                         ;; A CONDITION OR A COMMAND, which needs the shell.
+                         ((not session) #f)
+                         (else
+                          (let ((v (guard-value session value-field #:module module)))
+                            (and (not (eq? v 'unknown)) v))))))))
 
 (define* (menu-rows entry #:key session (module (menu-resolution-module)))
   "The rows ENTRY would show, in order: its children, then its provider's.
@@ -266,12 +313,29 @@ from the same provider, so a submenu can be a fixed list with a generated tail."
 
 Only static children are searched. A provider's rows do not exist until it is
 asked, so a path cannot name one; that is what running them by value is for."
+  ;; A BARE LIST OF ENTRIES IS ITS OWN CHILDREN, and the root of a menu may be
+  ;; one: the top level of a menu is a list, not a keyed entry, and asking it for
+  ;; a `submenu' field finds none -- so every path from a bare-list root answered
+  ;; #f.  The same shape question `menu-splice-at' has to ask.
   (let loop ((entry root) (path path))
     (cond ((null? path) entry)
           (else
            (let ((key (car path)))
-             (let ((child (find (lambda (e) (eq? (entry-key e) key))
-                                (or (entry-children entry) '()))))
+             (let* ((children (cond ((and (pair? entry) (eq? (car entry) 'key))
+                                     (entry-children entry))
+                                    ;; A BARE LIST IS A CONTAINER ONLY WHEN ITS
+                                    ;; ELEMENTS ARE ENTRIES.  `(list? entry)' on
+                                    ;; its own accepts a property list too, and
+                                    ;; then the walk steps into `label', `"Go"'
+                                    ;; and `submenu' as if they were rows.
+                                    ((and (list? entry)
+                                          (pair? entry)
+                                          (every (lambda (e) (and (pair? e) (eq? (car e) 'key)))
+                                                 entry))
+                                     entry)
+                                    (else #f)))
+                    (child (and children
+                                (find (lambda (e) (eq? (entry-key e) key)) children))))
                (and child (loop child (cdr path)))))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -322,8 +386,37 @@ would then answer with whichever came first."
           ((eq? (car rest) 'submenu) (append out (list 'submenu children) (cddr rest)))
           (else (loop (cddr rest) (append out (list (car rest) (cadr rest))))))))
 
+;; THE CONTAINER AT THE END OF A PATH IS EITHER A KEYED ENTRY -- `(key apps …
+;; submenu (…))' -- OR A BARE LIST OF ENTRIES, which is what the TOP LEVEL of a
+;; menu is.  A bare list is not an entry: it has no `submenu' field for
+;; `menu-children-or-#f' to find, so descending into it answered #f and the top
+;; level could not be spliced into at all.  `(#f)' -- the front of the top level
+;; -- was therefore impossible, and a path that named the top level produced a
+;; CORRUPTED menu rather than the #f this function promises.
+(define (menu-container? thing)
+  "Whether THING holds entries: a keyed entry with a `submenu', or a list whose
+elements are entries -- the top level."
+  (or (and (pair? thing) (eq? (car thing) 'key) (menu-children-or-#f thing) #t)
+      (and (list? thing) (every (lambda (e) (and (pair? e) (eq? (car e) 'key))) thing))))
+
+(define (menu-container-children thing)
+  "THING's entries: a keyed entry's `submenu', or a bare list itself."
+  (if (and (pair? thing) (eq? (car thing) 'key))
+      (menu-children-or-#f thing)
+      thing))
+
+(define (menu-rebuild-container thing children)
+  "THING with its entries replaced by CHILDREN, in its own shape."
+  (if (and (pair? thing) (eq? (car thing) 'key))
+      (menu-entry-with-children thing children)
+      children))
+
 (define (menu-splice-at entry path sub)
   "ENTRY with the submenu PATH names rebuilt by calling SUB on its children.
+
+ENTRY may also be THE TOP LEVEL: a bare list of entries rather than a keyed
+entry.  A path of zero keys with a bare list is how a row is put at the front of
+a menu.
 
 PATH is the keys to descend, with no anchor: `(apps share)' means the entry
 called `share' inside the entry called `apps'. SUB takes the container's current
@@ -347,25 +440,34 @@ call.
 
 A FAILURE ANYWHERE IS A FAILURE AT THE TOP: the parent returns #f rather than a
 tree containing #f, which is what `menu-splice' promises its caller."
-  (let ((old (menu-children-or-#f entry)))
-    (cond
-     ;; No static children: there is nothing here to descend through or to hold
-     ;; the new row. An entry whose rows come from a provider is this case.
-     ((not old) #f)
-     ;; THE CONTAINER -- the path is spent, so these children are what SUB is for.
-     ((null? path) (menu-entry-with-children entry (sub old)))
-     (else
-      (let ((child (find (lambda (e) (eq? (entry-key e) (car path))) old)))
-        (and child
-             ;; ONE STEP: rebuild the matching child, carry the rest by identity.
-             ;; `map' would be shorter and is wrong -- a #f from the failed child
-             ;; would land in its siblings' list. `and' on the way through means
-             ;; one failure aborts the whole walk.
-             (let ((rebuilt (menu-splice-at child (cdr path) sub)))
-               (and rebuilt
-                    (menu-entry-with-children
-                     entry
-                     (map (lambda (e) (if (eq? e child) rebuilt e)) old))))))))))
+  (cond
+   ;; THE TOP LEVEL HAS NO KEY, and is only ever reached with a spent path: a key
+   ;; is looked for among ENTRIES, and the top level's elements are entries.
+   ((and (null? path)
+         (list? entry)
+         (not (eq? (car entry) 'key))
+         (every (lambda (e) (and (pair? e) (eq? (car e) 'key))) entry))
+    (sub entry))
+   (else
+    (let ((old (menu-children-or-#f entry)))
+      (cond
+       ;; No static children: there is nothing here to descend through or to hold
+       ;; the new row. An entry whose rows come from a provider is this case.
+       ((not old) #f)
+       ;; THE CONTAINER -- the path is spent, so these children are what SUB is for.
+       ((null? path) (menu-entry-with-children entry (sub old)))
+       (else
+        (let ((child (find (lambda (e) (eq? (entry-key e) (car path))) old)))
+          (and child
+               ;; ONE STEP: rebuild the matching child, carry the rest by identity.
+               ;; `map' would be shorter and is wrong -- a #f from the failed child
+               ;; would land in its siblings' list. `and' on the way through means
+               ;; one failure aborts the whole walk.
+               (let ((rebuilt (menu-splice-at child (cdr path) sub)))
+                 (and rebuilt
+                      (menu-entry-with-children
+                       entry
+                       (map (lambda (e) (if (eq? e child) rebuilt e)) old))))))))))))
 
 (define* (menu-splice main-menu sub-menu location)
   "MAIN-MENU with SUB-MENU spliced in at LOCATION. The full menu comes back.
@@ -409,6 +511,12 @@ itself rebuilds the top of the tree only after the bottom has succeeded."
                                        (append out (list e sub-menu) (cdr rest))
                                        (loop (cdr rest) (append out (list e))))))))
                         (cons sub-menu old)))))
+        ;; WHICH SHAPE THE CONTAINER IS -- a keyed entry, or the bare list that
+        ;; is the top level -- is `menu-splice-at''s to decide, by looking.  A
+        ;; shortcut here for the empty path was WRONG: a menu handed in as a
+        ;; single root entry also has an empty path, and treating it as a list of
+        ;; entries walked its property list as if `label', `"Go"' and `submenu'
+        ;; were rows.
         (menu-splice-at main-menu path sub))))
 
 (define* (menu-run entry #:key (module (menu-resolution-module)))

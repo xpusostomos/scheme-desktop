@@ -223,11 +223,24 @@ comment rule depends on."
   '(("aliases" . aliases) ("description" . description) ("searchTerms" . search-terms)))
 
 (define %guard-fields
-  '(("when" . when) ("checked" . checked) ("disabled" . disabled)))
+  ;; `checked' IS NOT ONE OF THEM ANY MORE.  It said "is this thing on", which is
+  ;; the boolean half of a SETTING, and a setting is `value' with a `type' now --
+  ;; so it is written as `type boolean' and `value', and the runtime reads one
+  ;; shape rather than two.  See `value-fields' just below.
+  '(("when" . when) ("disabled" . disabled)))
+
+;; A ROW WITH `checked' IS A BOOLEAN SETTING: the same field, under the name the
+;; rest of the menu uses.
+(define (value-fields entry)
+  (let ((checked (string-field entry "checked")))
+    (if checked
+        (list 'type ''boolean 'value checked)
+        '())))
 
 (define %known-fields
   '("icon" "iconFont" "label" "title" "action" "target" "provider"
     "aliases" "description" "searchTerms" "when" "checked" "disabled"
+    "type" "value" "options"
     "parent" "items"))
 
 (define (string-field entry name)
@@ -344,6 +357,7 @@ everything below only renders its result."
                    (let ((v (string-field entry (car pair))))
                      (if v (list (cdr pair) v) '())))
                  %guard-fields)
+     (value-fields entry)
      (cond (action (list 'action action))
            (provider (list 'provider (provider-symbol provider)))
            ((pair? kids)

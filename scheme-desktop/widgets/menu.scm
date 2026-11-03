@@ -33,6 +33,8 @@
   #:use-module (scheme-desktop wm)
   #:use-module (scheme-desktop menu)
   #:use-module (scheme-desktop menu guards)
+  ;; `exec-shell', for a string-valued `action' that takes a value.
+  #:use-module (scheme-toolkit process)
   #:use-module (ice-9 format)
   #:use-module (srfi srfi-1)
   #:duplicates (merge-generics replace warn-override-core warn last)
@@ -44,6 +46,8 @@
 (define-gi-imports "Gtk"
   "Box" "Label" "Button" "Image" "ScrolledWindow" "EventControllerKey"
   "IconTheme" "Settings"
+  ;; For the string and number editors, which are a text field.
+  "Entry"
   ;; For keeping the cursor on screen: the scroll view's adjustment, and the
   ;; geometry of the row the cursor is on.
   "Adjustment")
@@ -79,6 +83,21 @@
   ;; Where in the menu we are, as the path `menu-resolve' takes. Empty is root.
   (path      #:init-value '() #:accessor menu-panel-path
              #:setter menu-panel-path-set!)
+  ;; THE ROW BEING EDITED, while an editor is open -- the widget for a choice or
+  ;; a value, the row itself for the yes/no question -- or #f for the ordinary
+  ;; menu.  At most one of these two is set, and the menu is a list of rows again
+  ;; when both are #f.
+  (editing   #:init-value #f #:accessor menu-panel-editing
+             #:setter menu-panel-editing-set!)
+  (confirm   #:init-value #f #:accessor menu-panel-confirm
+             #:setter menu-panel-confirm-set!)
+  ;; WHERE IN THE ROWS THE EDITED ONE IS, the widget its row drew (for a choice,
+  ;; whose setter is on the widget), and what has been typed into a string or
+  ;; number editor.
+  (editor-row-index #:init-value #f #:accessor menu-panel-editor-row-index
+                    #:setter menu-panel-editor-row-index-set!)
+  (typed      #:init-value "" #:accessor menu-panel-typed
+              #:setter menu-panel-typed-set!)
   (index     #:init-value 0   #:accessor menu-panel-index
              #:setter menu-panel-index-set!)
 
@@ -179,6 +198,31 @@ nothing here has to guess which it is holding."
         (element <gtk-label> #:class "menu-item-icon"
                  #:label (or glyph "")))))
 
+;; THE BOX AT THE RIGHT OF A ROW, and what it says.  A typed row is a SETTING,
+;; and the box is its value:
+;;
+;;   boolean   an empty box, or one with a tick -- U+2610 and U+2611, a matched
+;;             pair, so a row does not change width when it is toggled
+;;   option    the same two boxes, one per choice, and the box for the option the
+;;             value names carries the tick (the editors are next; today the
+;;             current option is shown as text)
+;;   number    the number, as text
+;;   string    the text, in quotes
+;;
+;; A ROW WITH NO TYPE SHOWS NOTHING, which is every Omarchy row -- their menus
+;; install and remove things and have no settings in them.
+(define glyph-ticked (string (integer->char #x2611)))
+(define glyph-unticked (string (integer->char #x2610)))
+
+(define (box-text row)
+  "What the box at the end of ROW says, or #f for no box."
+  (let ((type (menu-row-type row))
+        (value (menu-row-value row)))
+    (case type
+      ((boolean) (if (equal? value "true") glyph-ticked glyph-unticked))
+      ((number string option) (or value ""))
+      (else #f))))
+
 (define (row-widget w row selected?)
   "One row: a button, so it is clickable, holding icon, label and arrow."
   (let ((button (element <gtk-button>
@@ -198,6 +242,15 @@ nothing here has to guess which it is holding."
                                      ;; too long for it is cut here and ends in
                                      ;; an ellipsis rather than widening the menu.
                                      #:ellipsize 'end)
+                            ;; THE BOX FIRST, THEN THE ARROW: a typed row shows
+                            ;; its value, and the arrow still says it opens
+                            ;; something -- which, for a typed row, is its editor.
+                            (let ((box (box-text row)))
+                              (if box
+                                  (element <gtk-label> #:class "menu-item-box"
+                                           #:label box #:xalign 1.0)
+                                  (element <gtk-label> #:class "menu-item-box"
+                                           #:label "" #:xalign 1.0)))
                             (element <gtk-label>
                                      #:class "menu-item-arrow"
                                      #:label (if (menu-row-submenu? row) ">" ""))))))
@@ -233,10 +286,20 @@ nothing here has to guess which it is holding."
   ;; long submenu into a short one cannot leave it past the end.
   (when (pair? (menu-panel-rows w))
     (menu-panel-index-set! w (max 0 (min (menu-panel-index w) (- (length (menu-panel-rows w)) 1)))))
-  (let loop ((rest (menu-panel-rows w)) (i 0))
-    (when (pair? rest)
-      (add-child! (menu-panel-items w) (row-widget w (car rest) (= i (menu-panel-index w))) #f)
-      (loop (cdr rest) (+ i 1)))))
+  (cond
+   ;; AN EDITOR, or the question that comes before one: rows of its own, built by
+   ;; the editor, in the same box the menu's rows use.
+   ((menu-panel-confirm w)
+    (for-each (lambda (tree) (add-child! (menu-panel-items w) tree #f))
+              (confirm-rows w (menu-panel-confirm w))))
+   ((menu-panel-editing w)
+    (for-each (lambda (tree) (add-child! (menu-panel-items w) tree #f))
+              (editor-rows w (menu-panel-editing w))))
+   (else
+    (let loop ((rest (menu-panel-rows w)) (i 0))
+      (when (pair? rest)
+        (add-child! (menu-panel-items w) (row-widget w (car rest) (= i (menu-panel-index w))) #f)
+        (loop (cdr rest) (+ i 1)))))))
 
 (define (%render! w)
   "Redraw the rows, in a scope of their own."
@@ -357,23 +420,41 @@ make the list creep as the cursor walks through it."
     (when row
       (cond
        ((menu-row-disabled? row) #f)     ; already installed; nothing to do
+       ;; A TYPED ROW IS A SETTING AND OPENS ITS EDITOR, before the submenu test:
+       ;; a generated row may have both, and the value is what choosing it means.
+       ((menu-row-type row)
+        (case (menu-row-type row)
+          ((boolean) (toggle-menu-row! w row))
+          ((choice) (open-editor! w row #:editor 'choice))
+          ((string) (open-editor! w row #:editor 'string))
+          ((number) (open-editor! w row #:editor 'number))
+          (else (run-row! w row))))
        ((menu-row-submenu? row)
         (menu-panel-path-set! w (append (menu-panel-path w) (list (entry-key (menu-row-entry row)))))
         (menu-panel-index-set! w 0)
         (refresh-rows! w)
         (%render! w))
-       (else
-        (menu-run (menu-row-entry row))
-        (close-menu! w))))))
+       (else (run-row! w row))))))
+
+(define (run-row! w row)
+  "Run ROW's action and close the menu -- what a row with no type does."
+  (menu-run (menu-row-entry row))
+  (close-menu! w))
 
 (define (ascend! w)
   "Left: up a level. The rest of the menu is untouched -- you entered here, you
-are not cut off from the rest of it."
-  (unless (null? (menu-panel-path w))
+are not cut off from the rest of it.
+
+AN OPEN EDITOR IS A LEVEL, so Left leaves it first -- and the menu it was opened
+from is still there, because the editor never changed the path."
+  (cond
+   ((or (menu-panel-editing w) (menu-panel-confirm w)) (close-editor! w))
+   ((null? (menu-panel-path w)) #f)
+   (else
     (menu-panel-path-set! w (drop-right (menu-panel-path w) 1))
     (menu-panel-index-set! w 0)
     (refresh-rows! w)
-    (%render! w)))
+    (%render! w))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The window
@@ -600,3 +681,156 @@ window renders itself when it is."
                 (element <gtk-image>
                          #:icon-name (or (distro-icon-name) %fallback-icon)
                          #:use-fallback #t)))
+
+;;; ---------------------------------------------------------------------------
+;;; Editors: choosing a row's value, rather than running it
+;;; ---------------------------------------------------------------------------
+;;
+;; A TYPED ROW IS A SETTING, and choosing it opens its editor rather than running
+;; its action -- except a boolean, where the editor IS the action (turn it on,
+;; turn it off) and the only question is whether to ask first.
+;;
+;; The editors go down one level inside the menu, so they look like a submenu and
+;; are left the same way (Left, or Escape).
+;;
+;; **THE MENU KNOWS NOTHING ABOUT WHAT IT IS EDITING.**  A row says what its value
+;; IS (`value'), what to run to change it (`action', called with the new value),
+;; and -- for a choice -- what the choices are (`options').  That is the whole of
+;; it: the same three fields a hand-written row uses for anything else.  Which
+;; rows exist, and that some of them come from a widget's config, is the
+;; generator's business, not this file's.
+
+(define (choice-values row)
+  "ROW's options, as strings, for a `choice' -- from its own `options' field."
+  (let ((own (entry-ref (menu-row-entry row) 'options)))
+    (map (lambda (v) (if (string? v) v (symbol->string v)))
+         (cond ((pair? own) own)
+               ((vector? own) (vector->list own))
+               (else '())))))
+
+(define (value-matches? a b)
+  "Whether A and B are the same value.  Case-insensitive: a value is a word a
+person typed somewhere, and its spelling is not load-bearing."
+  (and a b (string-ci=? (if (string? a) a (symbol->string a))
+                        (if (string? b) b (symbol->string b)))))
+
+;; WHAT A ROW IS BEING SET TO *IS* ITS ACTION -- that is the whole mechanism, and
+;; it is why a choice is a plain `action' that takes an argument.
+
+(define (row-set-value! w row value)
+  "Set ROW to VALUE, by running its action WITH the value.
+
+A PROCEDURE ACTION IS CALLED WITH THE VALUE -- `(lambda (v) …)' is what a
+generated row's setter is.  A STRING ACTION IS A COMMAND LINE with the value
+appended as an argument: a command is arbitrary shell, and editing one to place a
+value would be guesswork.  A SYMBOL names a procedure, as everywhere else in a
+menu."
+  (let ((action (and row (entry-ref (menu-row-entry row) 'action))))
+    (cond
+     ((procedure? action) (catch #t (lambda () (action value)) (lambda args #f)))
+     ((symbol? action) (catch #t (lambda () (evaluate-menu-value action)) (lambda args #f)))
+     ((string? action)
+      (catch #t
+        (lambda ()
+          (exec-shell (format #f "~a ~a" action
+                              (if (string? value) value (symbol->string value)))))
+        (lambda args #f)))
+     (else #f))
+    (refresh-rows! w)))
+
+(define (editor-choice-tree w row option)
+  "One option of a `choice', with the box that says whether it is the current one."
+  (let ((current? (value-matches? option (menu-row-value row))))
+    (element <gtk-button>
+             #:class (string-append "menu-item" (if current? " current" ""))
+             #:can-focus #f
+             #:on-clicked (lambda (b)
+                            (row-set-value! w row option)
+                            (close-editor! w))
+      (element <gtk-box> #:orientation 'horizontal
+        (element <gtk-label> #:class "menu-item-label" #:xalign 0.0 #:hexpand #t
+                 #:label option)
+        (element <gtk-label> #:class "menu-item-box" #:xalign 1.0
+                 #:label (if current? glyph-ticked glyph-unticked))))))
+
+(define (editor-entry-tree w kind)
+  "A row with something to type in it -- a string, or a number."
+  (let ((entry (element <gtk-entry> #:class "menu-editor-entry"
+                        #:text (menu-panel-typed w)
+                        #:hexpand #t)))
+    ;; EVERY KEYSTROKE IS KEPT, so the text survives a redraw -- and so that the
+    ;; Ok button below can read it without reaching into the widget again.
+    (connect-signal! entry "changed"
+                     (lambda (e) (menu-panel-typed-set! w (slot-ref e 'text))))
+    (element <gtk-box> #:orientation 'vertical #:class "menu-editor"
+      (element <gtk-label> #:class "menu-editor-hint" #:xalign 0.0
+               #:label (if (eq? kind 'number) "New number" "New text"))
+      entry
+      (element <gtk-button> #:class "menu-item" #:can-focus #f
+               #:on-clicked (lambda (b)
+                              (let ((text (menu-panel-typed w)))
+                                (row-set-value! w (menu-panel-row-being-edited w)
+                                                (if (eq? kind 'number)
+                                                    (or (string->number text) text)
+                                                    text))
+                                (close-editor! w)))
+        (element <gtk-label> #:class "menu-item-label" #:xalign 0.0 #:hexpand #t
+                 #:label "Set")))))
+
+(define (editor-rows w kind)
+  "The rows of whichever editor KIND is -- 'choice, 'string or 'number."
+  (let ((row (menu-panel-row-being-edited w)))
+    (case kind
+      ((choice) (map (lambda (o) (editor-choice-tree w row o)) (choice-values row)))
+      ((string number) (list (editor-entry-tree w kind)))
+      (else '()))))
+
+(define (confirm-rows w row)
+  "The yes/no question a boolean row asks before its action runs."
+  (list (element <gtk-label> #:class "menu-editor-hint" #:xalign 0.0
+                 #:label (format #f "~a?" (menu-row-label row)))
+        (element <gtk-button> #:class "menu-item" #:can-focus #f
+                 #:on-clicked (lambda (b) (run-editor! w row))
+          (element <gtk-label> #:class "menu-item-label" #:xalign 0.0 #:hexpand #t
+                   #:label "Yes"))
+        (element <gtk-button> #:class "menu-item" #:can-focus #f
+                 #:on-clicked (lambda (b) (close-editor! w))
+          (element <gtk-label> #:class "menu-item-label" #:xalign 0.0 #:hexpand #t
+                   #:label "No"))))
+
+;;; The state an editor keeps while it is open.
+
+(define (menu-panel-row-being-edited w)
+  "The row the open editor belongs to, or #f.
+
+FOUND FROM THE INDEX AND THE ROWS, not kept: a row is rebuilt whenever the menu
+refreshes, so a stored one would be a row from before the last refresh."
+  (let ((i (menu-panel-editor-row-index w))
+        (rows (menu-panel-rows w)))
+    (and i (pair? rows) (< i (length rows)) (list-ref rows i))))
+
+(define* (open-editor! w row #:key (editor 'choice))
+  "Open ROW's editor: 'choice, 'string or 'number."
+  (menu-panel-editor-row-index-set! w (menu-panel-index w))
+  (menu-panel-typed-set! w (or (menu-row-value row) ""))
+  (menu-panel-editing-set! w editor)
+  (%render! w))
+
+(define (close-editor! w)
+  "Leave the editor and go back to the menu it was opened from."
+  (menu-panel-editing-set! w #f)
+  (menu-panel-confirm-set! w #f)
+  (menu-panel-editor-row-index-set! w #f)
+  (%render! w))
+
+(define (run-editor! w row)
+  "Run ROW's action -- what a boolean's Yes does -- and leave the editor."
+  (catch #t (lambda () (menu-run (menu-row-entry row))) (lambda args #f))
+  (close-editor! w))
+
+(define (toggle-menu-row! w row)
+  "Ask before running ROW's action, which for a boolean is how it is turned on or
+off: a setting changed from a menu is worth one question."
+  (menu-panel-editor-row-index-set! w (menu-panel-index w))
+  (menu-panel-confirm-set! w row)
+  (%render! w))

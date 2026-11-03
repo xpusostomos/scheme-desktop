@@ -162,4 +162,82 @@
     (test-equal "the branch's own children came with it"
       '(one two) (map entry-key (children-at tree '(trigger share extra))))))
 
+
+;;; ---------------------------------------------------------------------------
+;;; THE TOP LEVEL -- a list of entries, not an entry
+;;; ---------------------------------------------------------------------------
+;;
+;; The top level of a menu is NOT a keyed entry: it is the list the entries are
+;; in.  Every case above splices INTO an entry; these are the ones that splice
+;; into the list itself, and they were impossible until `menu-splice-at' learned
+;; to tell the two shapes apart -- a path of no keys was handed the top-level
+;; list, `menu-children-or-#f' looked for a `submenu' symbol among the ENTRIES,
+;; found none, and the call failed with a corrupted menu for a result.
+;;
+;; `(#f)' is the whole top level: no path, and the #f anchor meaning "the front".
+;; `(trigger)' is no path and an anchor, which now means "after the row called
+;; trigger, among the root's children" -- the same meaning the anchor already had
+;; one level down.
+
+(define (fresh-top)
+  ;; A menu whose TOP LEVEL IS A BARE LIST.  `fresh-menu' above wraps its
+  ;; children in a "Go" entry, which is the shape `menu-splice' was written for
+  ;; and the shape the top level is not.
+  (list (menu-entry 'key 'apps 'label "Apps" 'provider 'applisting)
+        (menu-entry 'key 'trigger 'label "Trigger"
+                    'submenu (list (menu-entry 'key 'share 'label "Share" 'action "share")))
+        (menu-entry 'key 'system 'label "System"
+                    'submenu (list (menu-entry 'key 'reboot 'label "Reboot" 'action "reboot")))))
+
+(define (top-keys tree) (map entry-key tree))
+
+(test-equal "at the front of the top level, with the #f anchor"
+  (list 'mine 'apps 'trigger 'system)
+  (top-keys (menu-splice (fresh-top) (new-row) '(#f))))
+
+(test-equal "at the end of the top level, with no anchor at all"
+  (list 'apps 'trigger 'system 'mine)
+  (top-keys (menu-splice (fresh-top) (new-row) '(system))))
+
+(test-equal "after a named row of the top level"
+  (list 'apps 'trigger 'mine 'system)
+  (top-keys (menu-splice (fresh-top) (new-row) '(trigger))))
+
+(test-equal "after a row that is not there: at the end, and not a corruption"
+  (list 'apps 'trigger 'system 'mine)
+  (top-keys (menu-splice (fresh-top) (new-row) '(nosuchrow))))
+
+(test-assert "the spliced row is an entry, not a bare symbol"
+  (let ((first (car (menu-splice (fresh-top) (new-row) '(#f)))))
+    (and (pair? first) (eq? (car first) 'key) (eq? (entry-key first) 'mine))))
+
+(test-equal "splicing into the top level leaves the submenus alone"
+  '(share)
+  (let* ((tree (menu-splice (fresh-top) (new-row) '(#f)))
+         (t (find (lambda (e) (eq? (entry-key e) 'trigger)) tree)))
+    ;; THE TOP LEVEL IS A BARE LIST, so `entry-children' answers #f for it and
+    ;; there is no root entry to ask.  The row's own children are what matter.
+    (map entry-key (entry-children t))))
+
+(test-equal "and leaves the rows inside them able to be spliced into"
+  (list 'clipboard 'share)
+  (let* ((tree (menu-splice (fresh-top) (new-row) '(#f)))
+         (after (menu-splice tree
+                             (menu-entry 'key 'clipboard 'label "Clip" 'action "x")
+                             '(trigger share #f))))
+    (map entry-key (children-at after '(trigger share)))))
+
+(test-equal "an empty location is still #f, not a no-op"
+  #f
+  (menu-splice (fresh-top) (new-row) '()))
+
+(test-equal "and a menu that is not there is #f"
+  #f
+  (menu-splice #f (new-row) '(#f)))
+
+(test-equal "a path into the top level's own entries still works"
+  '(share)
+  (let ((tree (menu-splice (fresh-top) (new-row) '(#f))))
+    (map entry-key (entry-children (find (lambda (e) (eq? (entry-key e) 'trigger)) tree)))))
+
 (test-end "menu-splice")

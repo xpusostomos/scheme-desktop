@@ -827,6 +827,17 @@ window#menu .menu-item-label {
   margin-left: calc(var(--spacing) * 0.6);
 }
 
+/* THE BOX AT THE RIGHT OF A ROW: a tick box for a boolean or an option, the
+   value as text for a number or a string.  It sits BEFORE the arrow, in the same
+   place whatever it says, so a row does not change width when its value does --
+   `min-width' is what holds the column still, and a tick and a box are the same
+   width anyway because they are a matched pair. */
+window#menu .menu-item-box {
+  color: color-mix(in srgb, var(--fg) 80%, transparent);
+  margin-left: calc(var(--spacing) * 0.6);
+  min-width: 1.2em;
+}
+
 window#menu .menu-item-arrow {
   color: color-mix(in srgb, var(--fg) 50%, transparent);
   margin-left: calc(var(--spacing) * 0.6);

@@ -42,7 +42,8 @@
             guard-value-status evaluate-menu-value
             guard-log
             guard-session? guard-timeout
-            guard-status->visible? guard-status->checked? guard-status->disabled?))
+            guard-status->visible? guard-status->checked? guard-status->disabled?
+            guard-session-value guard-value guard-value->text))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The shell
@@ -67,13 +68,30 @@
 ;; then waits, so a probe that ignores SIGTERM would hang the shell for ever --
 ;; and with a synchronous protocol that hangs the menu. `-k' is what makes
 ;; "half a second" true rather than aspirational.
+(define %value-marker "__value__:")
+
 (define (guard-program timeout)
+  ;; TWO KINDS OF QUESTION, AND THE LINE SAYS WHICH.  A condition is asked for its
+  ;; EXIT STATUS, as it always was.  A VALUE is asked for its OUTPUT, so its
+  ;; expression is sent with %value-marker in front and the answer carries both
+  ;; the status and the first line of what it printed -- one line, because the
+  ;; protocol is one line per question.
   (string-append
    "while IFS= read -r expr; do\n"
-   "  { timeout -k 0.2 "
-   (if (string? timeout) timeout (number->string timeout))
+   "  case \"$expr\" in\n"
+   "    " %value-marker "*)\n"
+   "      out=$( { timeout -k 0.2 " (if (string? timeout) timeout (number->string timeout))
+   " bash -c \"${expr#" %value-marker "}\"; } 2>/dev/null )\n"
+   "      code=$?\n"
+   "      line=$(printf '%s' \"$out\" | head -1)\n"
+   "      printf '" %value-marker "%s\\t%s\\n' \"$code\" \"$line\"\n"
+   "      ;;\n"
+   "    *)\n"
+   "      { timeout -k 0.2 " (if (string? timeout) timeout (number->string timeout))
    " bash -c \"$expr\"; } >/dev/null 2>&1\n"
-   "  printf '" %marker "%s\\n' \"$?\"\n"
+   "      printf '" %marker "%s\\n' \"$?\"\n"
+   "      ;;\n"
+   "  esac\n"
    "done\n"))
 
 ;;; ---------------------------------------------------------------------------
@@ -184,6 +202,44 @@ The shell is created here; no condition has run yet."
               ((guard-log) "~a (~a): ~a" n (status-explanation n) expression))
             (if (= n %timeout-status) 'unknown #f)))))
        (else (loop))))))
+
+(define (read-value port)
+  "The answer to a VALUE question: (STATUS . TEXT), or 'unknown.
+
+The text is what the command printed, first line only.  A status other than 0 is
+'unknown -- for a value, a command that failed did not tell us the value, which
+is not the same as an empty one."
+  (let loop ()
+    (let ((line (read-line port)))
+      (cond
+       ((eof-object? line) 'unknown)
+       ((string-prefix? %value-marker line)
+        (let* ((rest (substring line (string-length %value-marker)))
+               (tab (string-index rest #\tab))
+               (status (and tab (string->number (substring rest 0 tab))))
+               (text (if tab (substring rest (+ tab 1)) "")))
+          (cond ((not status)
+                 ((guard-log) "unreadable value answer ~s" line)
+                 'unknown)
+                ((zero? status) text)
+                ((= status %timeout-status) 'unknown)
+                (else
+                 (when (>= status 124)
+                   ((guard-log) "~a (~a) asking for a value" status (status-explanation status)))
+                 'unknown))))
+       (else (loop))))))
+
+(define (guard-session-value session expression)
+  "What EXPRESSION prints: its first line, or 'unknown."
+  (let ((port (guard-session-port session)))
+    (catch #t
+      (lambda ()
+        (display %value-marker port)
+        (display expression port)
+        (newline port)
+        (force-output port)
+        (read-value port))
+      (lambda args 'unknown))))
 
 (define (guard-session-ask session expression)
   "EXPRESSION's status: #t, #f, or 'unknown if it could not be decided."
@@ -313,4 +369,43 @@ no."
             (if result #t #f)))
         (lambda (key . args)
           ((guard-log) "condition raised ~a ~s: ~s" key args value)
+          'unknown))))
+
+;;; ---------------------------------------------------------------------------
+;;; A field's VALUE -- what it is, not whether it is true
+;;; ---------------------------------------------------------------------------
+;;
+;; The other half of the same idea as `guard-value-status'.  A condition asks a
+;; command whether it succeeded; a VALUE asks it what it printed.  Both shapes are
+;; accepted, and they mean the same thing they do everywhere else in a menu:
+;;
+;;   "omarchy-pkg-present foo"     a string -> a bash command, its output read
+;;   my-widget-cost                a symbol -> the Scheme procedure of that name
+;;   (lambda () 42)                a list   -> a Scheme form
+;;
+;; A SCHEME VALUE IS MADE INTO TEXT HERE, and a bash one is already text: the two
+;; arrive at the menu as the same thing, which is what lets the type field decide
+;; what a value MEANS rather than where it came from.
+
+(define (guard-value->text value)
+  "VALUE as text, for a way of not telling it apart: #t/#f as \"#t\"/\"#f\", a
+symbol as its name, a number and a string as themselves, anything else written."
+  (cond ((eq? value #t) "#t")
+        ((eq? value #f) "#f")
+        ((symbol? value) (symbol->string value))
+        ((string? value) value)
+        ((number? value) (number->string value))
+        (else (format #f "~s" value))))
+
+(define* (guard-value session value #:key (module (current-module)))
+  "VALUE's value: text, or 'unknown when it could not be had.
+
+A string is a bash command and its OUTPUT is the value; a symbol or a list is
+Scheme, run here.  Scheme that raises is 'unknown, as a condition that raises is."
+  (if (string? value)
+      (guard-session-value session value)
+      (catch #t
+        (lambda () (guard-value->text (evaluate-menu-value value #:module module)))
+        (lambda (key . args)
+          ((guard-log) "value raised ~a ~s: ~s" key args value)
           'unknown))))
