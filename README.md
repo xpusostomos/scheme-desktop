@@ -21,7 +21,7 @@ project there.
 ## Check out my other projects:
 
 * [Hyprscheme - program Hyprland in scheme](https://github.com/xpusostomos/Hyprscheme)
-* [Scheme Desktop - a replacement for Quickshell in Scheme](https://github.com/xpusostomos/scheme-desktop)
+* [Schemacs - Emacs in Scheme](https://github.com/xpusostomos/schemacs)
 * [Scheme Terminal - terminal app programmable in Scheme](https://github.com/xpusostomos/scheme-terminal)
 * [Guile scsh - a scheme shell with structured editing](https://github.com/xpusostomos/guile-scsh)
 
