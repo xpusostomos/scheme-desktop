@@ -220,7 +220,9 @@
     (map entry-key (entry-children t))))
 
 (test-equal "and leaves the rows inside them able to be spliced into"
-  (list 'clipboard 'share)
+  ;; `(share)' HAS NO CHILDREN in `fresh-top', so after the splice its children
+  ;; are the row alone -- the entry gained a `submenu' rather than replacing one.
+  '(clipboard)
   (let* ((tree (menu-splice (fresh-top) (new-row) '(#f)))
          (after (menu-splice tree
                              (menu-entry 'key 'clipboard 'label "Clip" 'action "x")

@@ -308,35 +308,18 @@ from the same provider, so a submenu can be a fixed list with a generated tail."
 (define* (menu-resolve path #:key (root (menu)))
   "The entry PATH names -- a list of keys -- or #f.
 
-  (menu-resolve '())                    ; the root entry
+  (menu-resolve '())                    ; the root (an entry, or the top level)
   (menu-resolve '(trigger reminder))    ; that submenu
 
 Only static children are searched. A provider's rows do not exist until it is
 asked, so a path cannot name one; that is what running them by value is for."
-  ;; A BARE LIST OF ENTRIES IS ITS OWN CHILDREN, and the root of a menu may be
-  ;; one: the top level of a menu is a list, not a keyed entry, and asking it for
-  ;; a `submenu' field finds none -- so every path from a bare-list root answered
-  ;; #f.  The same shape question `menu-splice-at' has to ask.
-  (let loop ((entry root) (path path))
-    (cond ((null? path) entry)
+  (let loop ((container root) (keys path))
+    (cond ((null? keys) container)
           (else
-           (let ((key (car path)))
-             (let* ((children (cond ((and (pair? entry) (eq? (car entry) 'key))
-                                     (entry-children entry))
-                                    ;; A BARE LIST IS A CONTAINER ONLY WHEN ITS
-                                    ;; ELEMENTS ARE ENTRIES.  `(list? entry)' on
-                                    ;; its own accepts a property list too, and
-                                    ;; then the walk steps into `label', `"Go"'
-                                    ;; and `submenu' as if they were rows.
-                                    ((and (list? entry)
-                                          (pair? entry)
-                                          (every (lambda (e) (and (pair? e) (eq? (car e) 'key)))
-                                                 entry))
-                                     entry)
-                                    (else #f)))
-                    (child (and children
-                                (find (lambda (e) (eq? (entry-key e) key)) children))))
-               (and child (loop child (cdr path)))))))))
+           (let ((children (menu-children-of container)))
+             (and children
+                  (let ((child (find (lambda (e) (eq? (entry-key e) (car keys))) children)))
+                    (and child (loop child (cdr keys))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Putting a submenu into the menu
@@ -386,88 +369,45 @@ would then answer with whichever came first."
           ((eq? (car rest) 'submenu) (append out (list 'submenu children) (cddr rest)))
           (else (loop (cddr rest) (append out (list (car rest) (cadr rest))))))))
 
-;; THE CONTAINER AT THE END OF A PATH IS EITHER A KEYED ENTRY -- `(key apps …
-;; submenu (…))' -- OR A BARE LIST OF ENTRIES, which is what the TOP LEVEL of a
-;; menu is.  A bare list is not an entry: it has no `submenu' field for
-;; `menu-children-or-#f' to find, so descending into it answered #f and the top
-;; level could not be spliced into at all.  `(#f)' -- the front of the top level
-;; -- was therefore impossible, and a path that named the top level produced a
-;; CORRUPTED menu rather than the #f this function promises.
-(define (menu-container? thing)
-  "Whether THING holds entries: a keyed entry with a `submenu', or a list whose
-elements are entries -- the top level."
-  (or (and (pair? thing) (eq? (car thing) 'key) (menu-children-or-#f thing) #t)
-      (and (list? thing) (every (lambda (e) (and (pair? e) (eq? (car e) 'key))) thing))))
+;; A MENU IS EITHER AN ENTRY OR A LIST OF ENTRIES, and telling them apart is the
+;; whole difficulty.  AN ENTRY is a property list, whose head is a SYMBOL -- the
+;; name of its first field, `key' or `label'.  AN ENTRY LIST is a list of entries,
+;; whose head is a PAIR, or which is empty.  Both tests are needed: a list of
+;; entries is not an entry (no `submenu' field), and an entry is not a list of
+;; entries (its head is a symbol, not a pair).
+;;
+;; The top level of a menu is an entry list, which is why splicing into it used
+;; to fail: every function assumed an entry.
+(define (menu-entry-list? thing)
+  "Whether THING is a list OF ENTRIES, rather than an entry."
+  (and (list? thing) (or (null? thing) (pair? (car thing)))))
 
-(define (menu-container-children thing)
-  "THING's entries: a keyed entry's `submenu', or a bare list itself."
-  (if (and (pair? thing) (eq? (car thing) 'key))
-      (menu-children-or-#f thing)
-      thing))
+(define (menu-children-of thing)
+  "THING's entries: an entry's `submenu', or the list itself when it is one of
+the top level's.  #f for anything else, #f included."
+  (cond ((menu-entry-list? thing) thing)
+        ((and (pair? thing) (symbol? (car thing))) (menu-children-or-#f thing))
+        (else #f)))
 
-(define (menu-rebuild-container thing children)
+(define (menu-rebuild thing children)
   "THING with its entries replaced by CHILDREN, in its own shape."
-  (if (and (pair? thing) (eq? (car thing) 'key))
-      (menu-entry-with-children thing children)
-      children))
+  (if (menu-entry-list? thing)
+      children
+      (menu-entry-with-children thing children)))
 
-(define (menu-splice-at entry path sub)
-  "ENTRY with the submenu PATH names rebuilt by calling SUB on its children.
+(define (menu-splice-list children anchor sub)
+  "CHILDREN with SUB after the entry keyed ANCHOR, or at the end, or at the front
+when ANCHOR is #f.
 
-ENTRY may also be THE TOP LEVEL: a bare list of entries rather than a keyed
-entry.  A path of zero keys with a bare list is how a row is put at the front of
-a menu.
-
-PATH is the keys to descend, with no anchor: `(apps share)' means the entry
-called `share' inside the entry called `apps'. SUB takes the container's current
-children and returns what should replace them -- so the position logic lives in
-the caller, once, rather than at every level of the recursion.
-
-EVERY KEY IS A DESCENT, INCLUDING THE LAST ONE, and getting that wrong is what
-made the first version splice into the wrong entry: a base case written as 'one
-key left, so this ENTRY is the container' hands the recursion the PARENT of the
-last key. `(apps share)' then rebuilt `apps'' children with `share' dropped out,
-and the new row went nowhere.
-
-THE DESCENT IS UNIFORM -- one step per key, and the empty path is the container
--- rather than a special case for the last key. That is not tidiness: the
-special-case version REBUILT the child on the way past, so every level above a
-failure still produced a new list. A failed branch handed #f up into the parent's
-children, `menu-entry-with-children' accepted it, and the result was a menu with
-a stray #f spliced into it instead of the #f the caller checks for. With one
-recursive shape there is exactly one place that can fail, and it fails the whole
-call.
-
-A FAILURE ANYWHERE IS A FAILURE AT THE TOP: the parent returns #f rather than a
-tree containing #f, which is what `menu-splice' promises its caller."
-  (cond
-   ;; THE TOP LEVEL HAS NO KEY, and is only ever reached with a spent path: a key
-   ;; is looked for among ENTRIES, and the top level's elements are entries.
-   ((and (null? path)
-         (list? entry)
-         (not (eq? (car entry) 'key))
-         (every (lambda (e) (and (pair? e) (eq? (car e) 'key))) entry))
-    (sub entry))
-   (else
-    (let ((old (menu-children-or-#f entry)))
-      (cond
-       ;; No static children: there is nothing here to descend through or to hold
-       ;; the new row. An entry whose rows come from a provider is this case.
-       ((not old) #f)
-       ;; THE CONTAINER -- the path is spent, so these children are what SUB is for.
-       ((null? path) (menu-entry-with-children entry (sub old)))
-       (else
-        (let ((child (find (lambda (e) (eq? (entry-key e) (car path))) old)))
-          (and child
-               ;; ONE STEP: rebuild the matching child, carry the rest by identity.
-               ;; `map' would be shorter and is wrong -- a #f from the failed child
-               ;; would land in its siblings' list. `and' on the way through means
-               ;; one failure aborts the whole walk.
-               (let ((rebuilt (menu-splice-at child (cdr path) sub)))
-                 (and rebuilt
-                      (menu-entry-with-children
-                       entry
-                       (map (lambda (e) (if (eq? e child) rebuilt e)) old))))))))))))
+A MISSING ANCHOR APPENDS: the path proved the container exists, and a row asked
+to sit after one that has gone is closer to the intent than dropping it."
+  (if (not anchor)
+      (cons sub children)
+      (let loop ((rest children) (out '()))
+        (cond ((null? rest) (append out (list sub)))
+              ((eq? (entry-key (car rest)) anchor)
+               (append out (list (car rest) sub) (cdr rest)))
+              (else (loop (cdr rest) (append out (list (car rest)))))))))
 
 (define* (menu-splice main-menu sub-menu location)
   "MAIN-MENU with SUB-MENU spliced in at LOCATION. The full menu comes back.
@@ -476,48 +416,63 @@ LOCATION is a list of keys whose LAST element is the anchor:
 
   (menu-splice m sub '(apps share file))   ; after the `file' row of apps>share
   (menu-splice m sub '(apps share #f))     ; as the FIRST row of apps>share
+  (menu-splice m sub '(#f))                ; at the very front of the menu
+
+A PATH OF NO KEYS -- `(anchor)' -- splices into the TOP LEVEL, which is a list of
+entries rather than an entry.
 
 DOMAIN: the keys descend through `submenu' values only -- so an entry whose rows
 come from a `provider' cannot be spliced into, because those rows do not exist
-until the provider is asked; there is nothing to put a row beside. The same
-restriction `menu-resolve' documents, for the same reason.
+until the provider is asked; there is nothing to put a row beside.
 
-RETURNS #F WHEN LOCATION DOES NOT NAME A PLACE, and deliberately rather than
-returning the menu unchanged: a splice that silently did nothing is the failure
-mode this whole function exists to avoid -- a user adds their row, sees no
-error, and cannot tell whether the path or the menu was wrong. The caller can
-then say which key was missing (see the REPL, which does).
+RETURNS #F WHEN LOCATION DOES NOT NAME A PLACE, rather than the menu unchanged:
+a splice that silently did nothing is the failure mode this exists to avoid.
 
-ATOMIC IN THE SENSE THAT MATTERS: nothing is spliced unless the whole path
-resolves. The descent checks each step and gives up on #f, and `menu-splice'
-itself rebuilds the top of the tree only after the bottom has succeeded."
+HOW IT IS BUILT: `%menu-with' walks the tree from the ROOT, rebuilding each level
+on the way out, and applies INSERT to the children of the entry the path names.
+That is the one shape that gets both the failure and the rebuild right -- finding
+the entry first and rebuilding it afterwards returns that entry alone."
   (if (or (null? location) (not main-menu))
       #f
       (let* ((anchor (car (last-pair location)))
-             (path (drop-right location 1))
-             ;; THE ANCHOR IS NOT A PATH SEGMENT -- see the note above.
-             (sub (lambda (old)
-                    (if anchor
-                        ;; AFTER the anchor row, or at the END when it is not
-                        ;; there. A MISSING ANCHOR APPENDS rather than failing:
-                        ;; the path proved the container exists, and a row the
-                        ;; user asked to sit after having gone is closer to what
-                        ;; they meant than putting it at the front.
-                        (let loop ((rest old) (out '()))
-                          (cond ((null? rest) (append out (list sub-menu)))
-                                (else
-                                 (let ((e (car rest)))
-                                   (if (eq? (entry-key e) anchor)
-                                       (append out (list e sub-menu) (cdr rest))
-                                       (loop (cdr rest) (append out (list e))))))))
-                        (cons sub-menu old)))))
-        ;; WHICH SHAPE THE CONTAINER IS -- a keyed entry, or the bare list that
-        ;; is the top level -- is `menu-splice-at''s to decide, by looking.  A
-        ;; shortcut here for the empty path was WRONG: a menu handed in as a
-        ;; single root entry also has an empty path, and treating it as a list of
-        ;; entries walked its property list as if `label', `"Go"' and `submenu'
-        ;; were rows.
-        (menu-splice-at main-menu path sub))))
+             (keys (drop-right location 1))
+             (insert (lambda (children) (menu-splice-list children anchor sub-menu))))
+        ;; THE LAST KEY NAMES THE ENTRY WHOSE CHILDREN GET THE ROW, so it is
+        ;; resolved before anything is inserted.  The first version treated an
+        ;; exhausted path as "insert here", so `(trigger share file)' spliced
+        ;; into the LIST of share's siblings rather than into share's submenu --
+        ;; the row landed one level too high, and the tests said so.
+        (define (walk container keys)
+          (cond
+           ;; THE TOP LEVEL, or any container reached with nothing left to
+           ;; resolve: its entries are what the anchor is looked for among.
+           ;; THE CONTAINER'S CHILDREN ARE REBUILT *INSIDE IT*.  Returning the
+           ;; inserted list alone hands back the entry's `submenu' instead of the
+           ;; entry -- the same mistake the entry branch had, one level up.
+           ((null? keys) (menu-rebuild container (insert (menu-children-of container))))
+           ((menu-entry-list? container)
+            (let ((child (find (lambda (e) (eq? (entry-key e) (car keys))) container)))
+              (and child
+                   (let ((rebuilt (if (null? (cdr keys))
+                                      ;; THE LAST KEY: insert among ITS children, and
+                                      ;; an entry with no `submenu' yet GETS one --
+                                      ;; that is the ordinary case for a row that is
+                                      ;; a leaf, and failing there means a submenu
+                                      ;; cannot be built by splicing.
+                                      (menu-entry-with-children child (insert (or (menu-children-or-#f child) '())))
+                                      (walk child (cdr keys)))))
+                     (and rebuilt
+                          (map (lambda (e) (if (eq? e child) rebuilt e)) container))))))
+           (else
+            ;; AN ENTRY: rebuild it around its rebuilt children.  THIS ONE LINE
+            ;; IS THE WHOLE BUG THAT MADE THE TOP-LEVEL SPLICE RETURN A LIST --
+            ;; the walk handed back the children and dropped the entry they
+            ;; belonged to, so a root entry came back as its own `submenu'.
+            (let ((children (menu-children-or-#f container)))
+              (and children
+                   (let ((rebuilt (walk children keys)))
+                     (and rebuilt (menu-entry-with-children container rebuilt))))))))
+        (walk main-menu keys))))
 
 (define* (menu-run entry #:key (module (menu-resolution-module)))
   "Run ENTRY's action. Returns what the action returned."
