@@ -13,11 +13,6 @@ forward, money, AI tokens or human assistence would help it move
 forward much faster. Having said that, look at whats been achieved by
 one guy in a short time.
 
-
-## Check out my other projects:
-
-[Link Text](https://github.com)
-
 ## Developer Discussion
 
 Github forum is turned on above, you should feel free to discuss the
