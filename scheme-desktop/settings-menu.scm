@@ -36,8 +36,8 @@
   #:use-module (ice-9 format)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-13)
-  #:export (widget-menu-entries settings-menu-entries settings-menu
-            settings-splice!))
+  #:export (widget-menu-entries widget-submenu settings-menu-entries
+            settings-menu settings-splice!))
 
 ;;; ---------------------------------------------------------------------------
 ;;; One option, as a row
@@ -65,11 +65,18 @@
 ;; THE TWO PROCEDURES A ROW CARRIES, and they are the whole of the coupling: one
 ;; reads the option, one writes it.  Both close over the widget and the option
 ;; name, so the menu sees a row like any other.
+;;; THE TWO CLOSURES ARE NAMED, so that a dump of the menu can say what a row
+;; does instead of printing `#<procedure …>'.  `procedure-name' reports these,
+;; and a caller writing the menu out as data uses them.
+
 (define (value-reader w option)
-  (lambda () (or (current-value w option) "")))
+  "The procedure a row calls to read W's OPTION."
+  (define (read-option) (or (current-value w option) ""))
+  read-option)
 
 (define (value-writer w option)
-  (lambda (new-value)
+  "The procedure a row calls to set W's OPTION, given the new value."
+  (define (write-option new-value)
     (catch #t
       (lambda ()
         ;; A `choice' VALUE COMES BACK AS TEXT -- the menu shows strings, and its
@@ -82,7 +89,8 @@
         (format (current-error-port)
                 "scheme-desktop: settings: cannot set ~a to ~s: ~a ~s~%"
                 option new-value key args)
-        #f))))
+        #f)))
+  write-option)
 
 (define (coerce-value w option value)
   "VALUE -- text from the menu -- as W's OPTION wants it."
@@ -116,13 +124,21 @@
          ;; of the row -- which is where a value belongs, and where the editor
          ;; already looks for it.  A row whose label carried the value too would
          ;; say it twice.
-         (base (list (entry-key-for w option)
+         ;; `key` FIRST, as a field NAME: a menu entry is a property list, and
+         ;; without it the row is a list that begins with a STRING -- neither an
+         ;; entry nor a list of entries, so the menu could not walk into it and
+         ;; the Settings submenu came up empty.
+         (base (list 'key (entry-key-for w option)
                      'label (slot-label spec)
                      'value (value-reader w option)
                      'action (value-writer w option))))
     (case kind
       ((boolean) (append base (list 'type ''boolean)))
-      ((number) (append base (list 'type ''number)))
+      ;; `integer' IS ITS OWN DESCRIPTOR, with the same range shape as `number'
+      ;; -- `(integer 16 96)' for a bar's height.  It fell through to #f and the
+      ;; whole option vanished from the menu, which is why most widgets showed
+      ;; nothing: their options are integers.
+      ((number integer) (append base (list 'type ''number)))
       ((string) (append base (list 'type ''string)))
       ((choice) (append base (list 'type ''choice
                                    'options (map value-text (cdr type)))))
@@ -140,7 +156,7 @@
   "W as a submenu row, or #f when W has no option the menu can edit."
   (let ((rows (widget-menu-entries w)))
     (and (pair? rows)
-         (list (format #f "settings.~a" (widget-short-name w))
+         (list 'key (format #f "settings.~a" (widget-short-name w))
                'label (format #f "~a" (widget-short-name w))
                'submenu rows))))
 
@@ -160,7 +176,7 @@ theme, bar, menu, workspaces, clock, and so on -- and holds still between runs."
 (define (settings-menu)
   "The settings as a menu of their own -- for a shell that wants just this, and
 for a test that does not want to touch the real menu."
-  (list (list 'settings 'label "Settings" 'submenu (settings-menu-entries))))
+  (list (list 'key 'settings 'label "Settings" 'submenu (settings-menu-entries))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Splicing it into the menu in use
@@ -177,8 +193,13 @@ longer path.
 
 RETURNS #F, WITH A WORD, WHEN THERE IS NO SUCH ROW -- `menu-splice' answers #f
 rather than splicing nothing silently, and a caller has to know that."
-  (let* ((location (list after))
-         (spliced (menu-splice (menu) (settings-menu) location)))
+  ;; THE OLD SETTINGS GO FIRST.  Splicing twice used to append a second
+  ;; Settings row and leave the first one empty -- `menu-splice' has no notion of
+  ;; replacing, and the rows are generated fresh each time, so the stale one has
+  ;; to be taken out.
+  (let* ((without (menu-splice-drop (menu) 'settings))
+         (location (list after))
+         (spliced (menu-splice without (settings-menu) location)))
     (if spliced
         (begin (menu-set! spliced) location)
         (begin
@@ -186,3 +207,14 @@ rather than splicing nothing silently, and a caller has to know that."
                   "scheme-desktop: settings: no top-level row called ~s to splice after~%"
                   after)
           #f))))
+
+(define (menu-splice-drop menu key)
+  "MENU with the top-level entry keyed KEY removed, or MENU unchanged.
+
+Only the TOP LEVEL: the settings row is spliced there, and nothing else this
+shell generates shares its key."
+  (let ((inside (menu-children-or-#f menu)))
+    (if (not inside)
+        menu
+        (menu-entry-with-children
+         menu (remove (lambda (e) (eq? (entry-key e) key)) inside)))))

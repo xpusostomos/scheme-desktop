@@ -24,7 +24,11 @@
   #:use-module (scheme-toolkit services battery)
   #:use-module (scheme-toolkit services power-profiles)
   #:use-module (oop goops)
-  #:use-module (srfi srfi-1)
+  ;; `map' COMES FROM G-GOLF, which re-exports core Guile's own (its method is a
+  ;; one-line wrapper around it -- see `hl-api/gobject.scm').  Taking it from
+  ;; `(srfi srfi-1)' as well is the same procedure imported twice, and the
+  ;; compiler says so on every start; `filter' is the reason this import is here.
+  #:use-module ((srfi srfi-1) #:hide (map))
   #:use-module (ice-9 format)
 
   #:export (<battery-desktop-widget> <battery-panel-desktop-widget>

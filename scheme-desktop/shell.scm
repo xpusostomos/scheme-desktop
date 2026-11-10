@@ -74,6 +74,18 @@
   ;; handing it over here is the whole of what this shell supplies -- see
   ;; (scheme-desktop config), which also says where a config loads to.
   (start-shell-config! reload-shell!)
+  ;; THE SETTINGS MENU, spliced into the menu Omarchy provides.  AFTER the
+  ;; config has been loaded, because the rows are generated from the widgets'
+  ;; declarations and their CURRENT values -- so what the menu shows is what the
+  ;; shell is actually running with.
+  (catch #t
+    (lambda () ((@ (scheme-desktop settings-menu) settings-splice!)))
+    (lambda (key . args)
+      (catch #t
+        (lambda ()
+          ((@ (scheme-toolkit result) log-error) (cons key args)
+           "splicing the settings menu into the menu"))
+        (lambda a #f))))
   (build-all-bars!)
   ;; AND FOLLOW THE DESKTOP'S THEME WHILE WE RUN.  The stylesheet is generated
   ;; from the palette, the palette is a file the desktop rewrites when the

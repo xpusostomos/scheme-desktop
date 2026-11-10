@@ -49,6 +49,17 @@ case "${1:-run}" in
              "$DESKTOP_ROOT/scheme-desktop/shell.scm" "$@"
         ;;
 
+    dump-menu)
+        # Write the whole menu -- settings included -- as s-expressions.  In
+        # Scheme because it makes the widgets the config names and asks each for
+        # its options; the same module is what a REPL inside the shell calls, so
+        # this is the *no shell needed* way to the same file.
+        if [ $# -gt 0 ]; then shift; fi
+        exec "$TOOLKIT_ROOT/bin/scheme-toolkit" guile \
+             -L "$DESKTOP_ROOT" \
+             -s "$DESKTOP_ROOT/tools/dump-menu.scm" "$@"
+        ;;
+
     install|remove|enable|disable|update|plugins)
         # PLUGINS.  In Scheme, because enabling a widget means asking the widget
         # -- its `widget-enable!' -- and that is Scheme code.  The same

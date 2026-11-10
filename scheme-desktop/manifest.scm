@@ -25,7 +25,14 @@
 
 (define-module (scheme-desktop manifest)
   #:use-module (scheme-toolkit app)
-  #:use-module (scheme-toolkit config)
+  ;; TWO DIFFERENT `config-ref`s, both 2-argument, both plausible-looking:
+  ;; `(scheme-toolkit config)`'s takes (NAME OPTION) and reads a live option,
+  ;; `(scheme-toolkit config-splice)`'s takes (CONFIG PATH) and walks a config
+  ;; datum.  THIS MODULE WANTS THE LATTER (see `config-root-widgets'), and
+  ;; leaving the choice to import order is how a call silently starts reading
+  ;; the wrong thing when a `use-module' line moves.  Hiding the one it does not
+  ;; want makes the choice the file's, and the compiler's.
+  #:use-module ((scheme-toolkit config) #:hide (config-ref))
   #:use-module (scheme-toolkit config-splice)
   #:use-module ((scheme-toolkit file) #:select (mkdir-p))
   #:use-module (scheme-desktop splice)

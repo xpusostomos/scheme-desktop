@@ -12,6 +12,7 @@
 *.comld
 *.ext
 *~
+*.x
 
 # build artifacts
 .guile-cairo/
