@@ -1,0 +1,224 @@
+Arch packages scheme-desktop needs to run
+=========================================
+
+Every name below was checked against this machine: `pacman` for the official
+repositories, `yay -Ss` for the AUR.  The lists are derived from the code, not
+from memory:
+
+  * the GI namespaces come from every `gi-import`, `gi-import-by-name`,
+    `gi-irepository-require` and `define-gi-imports` in scheme-toolkit and
+    scheme-desktop;
+  * the program list comes from every string literal handed to `exec-async`,
+    `run-command` or `subprocess`;
+  * "(installed)" marks what is on this machine today.
+
+
+OFFICIAL REPOSITORIES
+---------------------
+
+Required:
+
+  guile                        3.0.11-1        (installed)  core
+      The interpreter.  Guile 3.0 is what the toolkit is built and tested on;
+      `use-modules' in `bin/scheme-toolkit' is compiled for it.
+
+  glib2                        2.90.1-1        (installed, via gtk4)
+      GLib.  It owns `libgirepository-2.0.so', the GObject Introspection
+      library G-Golf calls; without it nothing loads.
+      `gobject-introspection' is a separate package and a dependency of
+      G-Golf -- it is what compiles/loads the typelibs.
+
+  gtk4                         1:4.24.1-1      (installed)
+  libadwaita                   1:1.10.0-1      (installed)
+      GTK4, and Adwaita for the widgets that come from it.  Adwaita is widgets
+      only -- never `Adw.Application' (see scheme-toolkit/AGENTS.md).
+
+  gtk4-layer-shell             1.3.0-1         (installed)
+      MANDATORY, not optional.  `bin/scheme-toolkit' puts
+      `libgtk4-layer-shell.so' in LD_PRELOAD; without it every anchor and
+      exclusivity call silently does nothing and the bar has no layer.
+
+  gobject-introspection                        (installed, via guile-g-golf)
+      Not imported by any Scheme code, but it is what G-Golf needs to load a
+      typelib.  It comes in as a dependency of guile-g-golf (AUR, below).
+
+Required, runtime programs the shell executes:
+
+  hyprland                                     (installed)  extra
+      The compositor.  `hyprctl` is called for dispatch, monitor queries and
+      layer surfaces; the shells are written against Hyprland.
+
+  cliphist                     1:0.7.0-2       (installed)  extra
+      Clipboard history, `plugins.scm'.  Absent is handled gracefully.
+
+  wl-clipboard                 1:2.3.0-1       (installed)  extra
+      `wl-copy'/'wl-paste': clipboard writes and the screenshot pipeline.
+
+  grim                         1.5.0-2         (installed)  extra
+  slurp                        1.5.0-2         (installed)  extra
+      Screenshots: `grim -g "$(slurp)" - | wl-copy' in `api.scm'.
+
+  playerctl                    2.4.1-5                      extra
+      NOT INSTALLED HERE.  `api.scm' calls it for media control; a missing
+      playerctl is an ordinary state and is logged, not fatal.
+
+  jq                           1.8.2-1         (installed)  extra
+      Only for inspecting `hyprctl -j' output by hand.  Not called by the
+      shell -- the object model is used instead.  Drop it if you never do.
+
+  gdb                          18.1-1          (installed)  extra
+  coredumpctl (systemd)                        (installed)  core
+      Not needed to run, but `bin/scheme-desktop gdb' is the documented way to
+      find an exception escaping a C callback.
+
+Optional, feature-dependent (each is guarded in code, none is needed to start):
+
+  mako / dunst / any notification daemon      (whatever is installed)
+      scheme-desktop does not own `org.freedesktop.Notifications'; see
+      scheme-desktop/AGENTS.md D8.
+
+  ddcutil                      3.0.2-1         (installed)  extra
+      External-display brightness.  Internal panels go through
+      AstalBrightness, which needs no package.
+
+  brightnessctl                1.x             (installed)  extra
+      Only named in `process.scm''s documentation example; not called by the
+      shell today.
+
+  cava                         1.0.0-1                      extra
+      Only if the audio visualiser (AstalCava) is enabled.
+
+  hyprpaper / swww
+      Per-monitor wallpaper.  `hyprpaper' is in extra; `swww' is AUR-only
+      (below).  Neither is wired up yet.
+
+  wf-recorder                  0.x                          extra
+      Screen recording.  Not wired up yet.
+
+
+AUR (ABSENT FROM THE OFFICIAL REPOSITORIES)
+-------------------------------------------
+
+These are all installed from the AUR on this machine -- `pacman -Qm` lists
+them, and none has a `-Si` entry in an official repo.
+
+Required:
+
+  guile-g-golf                 0.8.7-1         (installed)
+      The GI binding the whole toolkit is written against.  Nothing works
+      without it.  NOTE: this exact version is also the one to pin; G-Golf's
+      `hl-api' is what `define-service' and the element runtime build on.
+
+  guile-lib                    0.2.8.1-1       (installed)  REQUIRED, transitively
+      No module here imports it, but `pacman -Qi guile-g-golf' lists it as a
+      dependency of G-Golf, so it arrives with G-Golf whether you name it or
+      not.  Named here so the list is complete.
+
+  guile-cairo                 1.11.2-1                     AUR
+      NOT INSTALLED HERE, and not yet imported by any module.  Listed because
+      scheme-toolkit/AGENTS.md § 4 names it for custom drawing; it becomes
+      required the day a cairo widget lands.  Install it before that.
+
+Required, the Astal libraries (one per namespace the code imports):
+
+  libastal-meta                1-9             (installed)
+      Meta package; pulls in every libastal service below.  Enumerate them
+      explicitly if you want a smaller install -- the code touches all of:
+        libastal-git                    core objects, Application
+        libastal-4-git                  Astal.Window, Box, Bin
+        libastal-io-git                 AstalIO.Process / Time
+        libastal-apps-git               application listing
+        libastal-hyprland-git           compositor state and events
+        libastal-workspace-git          ext-workspace-v1
+        libastal-wl-git                 Wayland registry / outputs
+        libastal-network-git            NetworkManager
+        libastal-bluetooth-git
+        libastal-wireplumber-git        AstalWp, audio
+        libastal-mpris-git
+        libastal-battery-git
+        libastal-powerprofiles-git
+        libastal-brightness-git
+        libastal-tray-git               StatusNotifier
+        libastal-notifd-git
+        libastal-idle-notify-git
+        libastal-cava-git
+      Also referenced, for the toolkit's other-consumer stories only -- the
+      shell does not import them yet:
+        libastal-auth-git               (services/auth.scm)
+        libastal-river-git              (services/river.scm)
+        libastal-greetd-git             (services/greet.scm)
+
+  All of these are `-git' packages: they track Astal's master and carry
+  version `r986.cbcd9f4-1' here.  Pin the commit in packaging -- see
+  scheme-toolkit/AGENTS.md § 9 "Astal upstream churn".
+
+Optional:
+
+  swww
+      Wallpaper daemon, AUR (`swww-git').  hyprpaper from extra is the
+      alternative; neither is wired up yet.
+
+
+INSTALLED LOCALLY, NOT PACKAGED
+-------------------------------
+
+  scheme-utils                                 UNPACKAGED -- required
+      `(scheme-utils repl server)', `(scheme-utils repl client)',
+      `(scheme-utils watch)', `(scheme-utils load)': the REPL back door the
+      shell is controlled through, and the file watcher the config reload uses.
+      There is no Arch package.  `make install-local' from ~/GIT/scheme-utils
+      puts it in ~/.local/share/guile/site/3.0 -- which Guile does NOT search
+      by default; `bin/repl' and the toolkit launcher add it by hand.
+      For a real package: `make install PREFIX=/usr' (the Makefile supports
+      DESTDIR), into /usr/share/guile/site/3.0 + /usr/lib/guile/3.0/site-ccache.
+
+  scheme-toolkit (UNPACKAGED -- required)
+      The library.  Nothing in scheme-desktop imports anything else.
+
+  scheme-desktop (UNPACKAGED -- this project)
+      `bin/scheme-toolkit' adds both checkouts' `-L' paths itself.
+
+  guile-gi-git                 1231.388653a-1  (installed, NOT required)
+      Deliberately unused: it shadows core syntax (`begin', `display', ...).
+      Listed only so it is not mistaken for a dependency.
+
+  guile-json3                  3.4.0-1         (installed)  AUR -- required
+      `(scheme-desktop menu omarchy)' imports `(json)' to convert Omarchy's
+      menu file.  That module is part of the menu path, so this is a real
+      dependency, not a tool: `dump-menu' fails to load without it.
+      Package name is version-specific: AUR has guile-json3 for 3.x, and
+      guile-json (4.x) is a different AUR package providing the same `(json)'
+      module.  Install whichever version you standardise on, but install one.
+
+  guile-ncurses                3.1-3           (installed, NOT required)
+      A schemacs dependency, not this project's.
+
+
+ENVIRONMENT, NOT PACKAGES
+-------------------------
+
+`bin/scheme-toolkit' sets these because the libraries live in /usr/local when
+built from source.  A packaged build in /usr needs none of them:
+
+  LD_LIBRARY_PATH=/usr/local/lib
+  GI_TYPELIB_PATH=/usr/local/lib/girepository-1.0
+  LD_PRELOAD=libgtk4-layer-shell.so
+
+Without GI_TYPELIB_PATH the Astal typelibs import in ENUMS-ONLY mode with no
+error: 24 bindings instead of 143.  That is the trap `bin/scheme-toolkit
+check-env' exists to catch.
+
+
+ONE LINE, OFFICIAL REPOS ONLY
+-----------------------------
+
+  sudo pacman -S --needed guile glib2 gtk4 libadwaita gtk4-layer-shell \
+                        hyprland cliphist wl-clipboard grim slurp playerctl jq
+
+  yay -S --needed guile-g-golf libastal-meta guile-json3
+
+  # guile-lib and gobject-introspection arrive as guile-g-golf's dependencies.
+
+then, for scheme-utils:
+
+  git clone <scheme-utils> && cd scheme-utils && make install PREFIX=/usr
